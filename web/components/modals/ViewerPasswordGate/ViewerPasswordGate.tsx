@@ -71,9 +71,6 @@ export const ViewerPasswordGate: FC<ViewerPasswordGateProps> = ({ onAuthenticate
         <Typography.Title level={3} className={styles.title}>
           Password Required
         </Typography.Title>
-        <Typography.Text className={styles.subtitle}>
-          This stream is protected. Please enter the password to continue.
-        </Typography.Text>
         <div className={styles.form}>
           <Input.Password
             placeholder="Enter password"
