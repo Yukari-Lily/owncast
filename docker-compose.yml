@@ -1,0 +1,12 @@
+version: "3.8"
+
+services:
+  owncast:
+    image: ghcr.io/yukari-lily/owncast:latest
+    container_name: owncast
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "1935:1935"
+    volumes:
+      - ./data:/app/data

@@ -1,0 +1,48 @@
+# Stage 1: Build frontend
+FROM node:18-alpine AS frontend
+
+WORKDIR /build/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+
+# Stage 2: Copy built frontend to static directory
+FROM alpine:3.19 AS assets
+
+WORKDIR /build
+COPY . /build
+COPY --from=frontend /build/web/out/ /build/static/web/
+
+# Stage 3: Build Go binary
+FROM golang:1.21-alpine AS build
+
+RUN apk update && apk add --no-cache git gcc build-base linux-headers
+
+WORKDIR /build
+COPY --from=assets /build /build
+
+ARG VERSION=dev
+ENV VERSION=${VERSION}
+ARG GIT_COMMIT
+ENV GIT_COMMIT=${GIT_COMMIT}
+ARG NAME=docker
+ENV NAME=${NAME}
+
+RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -ldflags "-extldflags \"-static\" -s -w -X github.com/owncast/owncast/config.GitCommit=$GIT_COMMIT -X github.com/owncast/owncast/config.VersionNumber=$VERSION -X github.com/owncast/owncast/config.BuildPlatform=$NAME" -o owncast .
+
+# Stage 4: Final runtime image
+FROM alpine:3.19.1
+RUN apk update && apk add --no-cache ffmpeg ffmpeg-libs ca-certificates && update-ca-certificates
+
+RUN addgroup -g 101 -S owncast && adduser -u 101 -S owncast -G owncast
+
+WORKDIR /app
+COPY --from=build /build/owncast /app/owncast
+RUN mkdir -p /app/data && chown -R owncast:owncast /app
+
+VOLUME /app/data
+
+USER owncast
+ENTRYPOINT ["/app/owncast"]
+EXPOSE 8080 1935
