@@ -131,7 +131,7 @@ const ServerStatusProvider: FC<ServerStatusProviderProps> = ({ children }) => {
         ...initialStatus,
         error: {
           type: 'OWNCAST_SERVICE_UNREACHABLE',
-          msg: 'Cannot connect to the Owncast service. Please check you are connected to the internet and the Owncast server is running.',
+          msg: 'Cannot connect to the service. Please check your internet connection and try again later.',
         },
       }));
       // todo

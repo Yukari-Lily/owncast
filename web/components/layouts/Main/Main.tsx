@@ -161,7 +161,7 @@ export const Main: FC = () => {
         fallbackRender={({ error }) => (
           <FatalErrorStateModal
             title="Error"
-            message={`There was an unexpected error. Please refresh the page to retry. If this error continues please file a bug with the Owncast project: ${error}`}
+            message={`There was an unexpected error. Please refresh the page to retry. ${error}`}
           />
         )}
       >

@@ -39,7 +39,7 @@ let serverStatusRefreshPoll: ReturnType<typeof setInterval>;
 let hasBeenModeratorNotified = false;
 let hasWebsocketDisconnected = false;
 
-const serverConnectivityError = `Cannot connect to the Owncast service. Please check your internet connection and verify this Owncast server is running.`;
+const serverConnectivityError = `Cannot connect to the service. Please check your internet connection and try again later.`;
 
 // Server status is what gets updated such as viewer count, durations,
 // stream title, online/offline state, etc.
