@@ -78,20 +78,13 @@ export const ViewerPasswordGate: FC<ViewerPasswordGateProps> = ({ onAuthenticate
           <Input.Password
             placeholder="Enter password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={e => setPassword(e.target.value)}
             onKeyDown={handleKeyDown}
             size="large"
             className={styles.input}
             disabled={loading}
           />
-          {error && (
-            <Alert
-              message={error}
-              type="error"
-              showIcon
-              className={styles.error}
-            />
-          )}
+          {error && <Alert message={error} type="error" showIcon className={styles.error} />}
           <Button
             type="primary"
             onClick={handleSubmit}
