@@ -140,14 +140,6 @@ func (s *Server) userMessageSent(eventData chatClientEvent) {
 		return
 	}
 
-	// Ignore if the stream has been offline
-	if !getStatus().Online && getStatus().LastDisconnectTime != nil {
-		disconnectedTime := getStatus().LastDisconnectTime.Time
-		if time.Since(disconnectedTime) > 5*time.Minute {
-			return
-		}
-	}
-
 	event.User = user.GetUserByToken(eventData.client.accessToken)
 
 	// Guard against nil users
