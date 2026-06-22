@@ -39,7 +39,7 @@ RUN addgroup -g 101 -S owncast && adduser -u 101 -S owncast -G owncast
 
 WORKDIR /app
 COPY --from=build /build/owncast /app/owncast
-RUN mkdir -p /app/data && chown -R owncast:owncast /app
+RUN mkdir -p /app/data && chown -R owncast:owncast /app/data
 
 VOLUME /app/data
 

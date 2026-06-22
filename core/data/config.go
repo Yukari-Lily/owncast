@@ -1071,6 +1071,11 @@ func CheckViewerAuthCookie(r *http.Request) bool {
 		return true
 	}
 
+	// If password is not set, allow access
+	if GetViewerPassword() == "" {
+		return true
+	}
+
 	cookie, err := r.Cookie(ViewerAuthCookieName)
 	if err != nil || cookie == nil || cookie.Value == "" {
 		return false

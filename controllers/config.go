@@ -139,7 +139,7 @@ func getConfigResponse() webConfigResponse {
 		Authentication:        authenticationResponse,
 		AppearanceVariables:   data.GetCustomColorVariableValues(),
 		HideViewerCount:       data.GetHideViewerCount(),
-		ViewerPasswordEnabled: data.GetViewerPasswordEnabled(),
+		ViewerPasswordEnabled: data.GetViewerPasswordEnabled() && data.GetViewerPassword() != "",
 	}
 }
 
