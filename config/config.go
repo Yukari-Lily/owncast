@@ -62,8 +62,6 @@ const MaxSocketPayloadSize = 2048
 
 // GetReleaseString gets the version string.
 func GetReleaseString() string {
-	versionNumber := VersionNumber
-	buildPlatform := BuildPlatform
 	gitCommit := GetCommit()
 
 	return fmt.Sprintf("Yukari ver 1.0 (%s)", gitCommit)
