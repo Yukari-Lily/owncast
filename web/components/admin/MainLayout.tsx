@@ -356,9 +356,7 @@ export const MainLayout: FC<MainLayoutProps> = ({ children }) => {
         <Content className="main-content-container">{children}</Content>
 
         <Footer className="footer-container">
-          <a href="https://owncast.online/?source=admin" target="_blank" rel="noopener noreferrer">
-            About Owncast v{versionNumber}
-          </a>
+          <span>Yukari ver 1.0</span>
         </Footer>
       </Layout>
 

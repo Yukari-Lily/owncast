@@ -66,5 +66,5 @@ func GetReleaseString() string {
 	buildPlatform := BuildPlatform
 	gitCommit := GetCommit()
 
-	return fmt.Sprintf("Owncast v%s-%s (%s)", versionNumber, buildPlatform, gitCommit)
+	return fmt.Sprintf("Yukari ver 1.0 (%s)", gitCommit)
 }
