@@ -187,7 +187,7 @@ export const ClientConfigStore: FC = () => {
   const setWebsocketService = useSetRecoilState<WebsocketService>(websocketServiceAtom);
   const setHiddenMessageIds = useSetRecoilState<string[]>(removedMessageIdsAtom);
   const [hasLoadedConfig, setHasLoadedConfig] = useState(false);
-  const setViewerAuthenticated = useSetRecoilState<boolean>(viewerAuthenticatedAtom);
+  const [viewerAuthenticated, setViewerAuthenticated] = useRecoilState<boolean>(viewerAuthenticatedAtom);
   const setViewerAuthCheckComplete = useSetRecoilState<boolean>(viewerAuthCheckCompleteAtom);
 
   let ws: WebsocketService;
@@ -530,6 +530,13 @@ export const ClientConfigStore: FC = () => {
       getChatHistory();
     }
   }, [accessToken]);
+
+  // When a new viewer authenticates via the password gate, register them for chat
+  useEffect(() => {
+    if (viewerAuthenticated && !accessToken) {
+      handleUserRegistration();
+    }
+  }, [viewerAuthenticated]);
 
   useEffect(() => {
     appStateService.onTransition(state => {
