@@ -187,7 +187,8 @@ export const ClientConfigStore: FC = () => {
   const setWebsocketService = useSetRecoilState<WebsocketService>(websocketServiceAtom);
   const setHiddenMessageIds = useSetRecoilState<string[]>(removedMessageIdsAtom);
   const [hasLoadedConfig, setHasLoadedConfig] = useState(false);
-  const [viewerAuthenticated, setViewerAuthenticated] = useRecoilState<boolean>(viewerAuthenticatedAtom);
+  const [viewerAuthenticated, setViewerAuthenticated] =
+    useRecoilState<boolean>(viewerAuthenticatedAtom);
   const setViewerAuthCheckComplete = useSetRecoilState<boolean>(viewerAuthCheckCompleteAtom);
 
   let ws: WebsocketService;
