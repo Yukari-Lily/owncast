@@ -202,11 +202,15 @@ func (s *Server) HandleClientConnection(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Check viewer password if enabled
-	if !data.CheckViewerAuthCookie(r) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte("viewer authentication required"))
-		return
+	accessToken := r.URL.Query().Get("accessToken")
+
+	// Check viewer password if enabled, but allow users with a valid access token
+	if accessToken == "" || user.GetUserByToken(accessToken) == nil {
+		if !data.CheckViewerAuthCookie(r) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte("viewer authentication required"))
+			return
+		}
 	}
 
 	ipAddress := utils.GetIPAddressFromRequest(r)
@@ -238,17 +242,15 @@ func (s *Server) HandleClientConnection(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	accessToken := r.URL.Query().Get("accessToken")
 	if accessToken == "" {
 		log.Errorln("Access token is required")
-		// Return HTTP status code
 		_ = conn.Close()
 		return
 	}
 
 	// A user is required to use the websocket
-	user := user.GetUserByToken(accessToken)
-	if user == nil {
+	chatUser := user.GetUserByToken(accessToken)
+	if chatUser == nil {
 		// Send error that registration is required
 		_ = conn.WriteJSON(events.EventPayload{
 			"type": events.ErrorNeedsRegistration,
@@ -258,8 +260,8 @@ func (s *Server) HandleClientConnection(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// User is disabled therefore we should disconnect.
-	if user.DisabledAt != nil {
-		log.Traceln("Disabled user", user.ID, user.DisplayName, "rejected")
+	if chatUser.DisabledAt != nil {
+		log.Traceln("Disabled user", chatUser.ID, chatUser.DisplayName, "rejected")
 		_ = conn.WriteJSON(events.EventPayload{
 			"type": events.ErrorUserDisabled,
 		})
@@ -269,7 +271,7 @@ func (s *Server) HandleClientConnection(w http.ResponseWriter, r *http.Request) 
 
 	userAgent := r.UserAgent()
 
-	s.Addclient(conn, user, accessToken, userAgent, ipAddress)
+	s.Addclient(conn, chatUser, accessToken, userAgent, ipAddress)
 }
 
 // Broadcast sends message to all connected clients.
