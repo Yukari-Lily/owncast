@@ -71,6 +71,9 @@ export const ViewerPasswordGate: FC<ViewerPasswordGateProps> = ({ onAuthenticate
         <Typography.Title level={3} className={styles.title}>
           Password Required
         </Typography.Title>
+        <Typography.Title level={5} className={styles.subtitle}>
+          臭臭的6位数字
+        </Typography.Title>
         <div className={styles.form}>
           <Input.Password
             placeholder="Enter password"
