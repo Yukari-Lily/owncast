@@ -69,10 +69,10 @@ export const ViewerPasswordGate: FC<ViewerPasswordGateProps> = ({ onAuthenticate
           <LockOutlined className={styles.icon} />
         </div>
         <Typography.Title level={3} className={styles.title}>
-          Password Required
+          需要密码喵
         </Typography.Title>
         <Typography.Title level={5} className={styles.subtitle}>
-          臭臭的6位数字
+          提示：臭臭的6位数字
         </Typography.Title>
         <div className={styles.form}>
           <Input.Password
