@@ -339,6 +339,7 @@ export const ClientConfigStore: FC = () => {
   const resetAndReAuth = () => {
     setLocalStorage(ACCESS_TOKEN_KEY, '');
     setAccessToken(null);
+    registrationAttempted.current = false;
     ws?.shutdown();
     handleUserRegistration();
   };

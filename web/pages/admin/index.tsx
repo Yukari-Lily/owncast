@@ -10,7 +10,6 @@ import { StreamHealthOverview } from '../../components/admin/StreamHealthOvervie
 
 import { LOGS_WARN, fetchData, FETCH_INTERVAL } from '../../utils/apis';
 import { formatIPAddress, isEmptyObject } from '../../utils/format';
-import { NewsFeed } from '../../components/admin/NewsFeed';
 
 import { AdminLayout } from '../../components/layouts/AdminLayout';
 
@@ -151,7 +150,7 @@ export default function Home() {
         </div>
 
         <Row gutter={[16, 16]} className="section stream-details-section">
-          <Col className="stream-details" span={12} sm={24} md={24} lg={12}>
+          <Col className="stream-details" span={24} sm={24} md={24} lg={24}>
             <Card
               size="small"
               title="Outbound Stream Details"
@@ -179,10 +178,6 @@ export default function Home() {
                 value={streamAudioDetailString}
               />
             </Card>
-          </Col>
-
-          <Col span={12} xs={24} sm={24} md={24} lg={12}>
-            <NewsFeed />
           </Col>
         </Row>
       </div>

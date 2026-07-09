@@ -46,10 +46,6 @@ const MinusSquareFilled = dynamic(() => import('@ant-design/icons/MinusSquareFil
   ssr: false,
 });
 
-const QuestionCircleOutlined = dynamic(() => import('@ant-design/icons/QuestionCircleOutlined'), {
-  ssr: false,
-});
-
 const MessageOutlined = dynamic(() => import('@ant-design/icons/MessageOutlined'), {
   ssr: false,
 });
@@ -273,11 +269,6 @@ export const MainLayout: FC<MainLayoutProps> = ({ children }) => {
     upgradeVersion && {
       key: '/admin/upgrade',
       label: <Link href="/admin/upgrade">{upgradeMessage}</Link>,
-    },
-    {
-      key: '/admin/help',
-      label: <Link href="/admin/help">Help</Link>,
-      icon: <QuestionCircleOutlined />,
     },
   ];
 

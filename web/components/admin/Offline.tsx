@@ -4,7 +4,6 @@ import { FC, useContext } from 'react';
 import dynamic from 'next/dynamic';
 import { LogTable } from './LogTable';
 import { OwncastLogo } from '../common/OwncastLogo/OwncastLogo';
-import { NewsFeed } from './NewsFeed';
 import { ConfigDetails } from '../../types/config-section';
 import { ServerStatusContext } from '../../utils/server-status-context';
 
@@ -159,15 +158,12 @@ export const Offline: FC<OfflineProps> = ({ logs = [], config }) => {
         </Col>
       </Row>
       <Row gutter={[16, 16]} className="offline-content">
-        <Col span={12} xs={24} sm={24} md={24} lg={12} className="list-section">
+        <Col span={24} xs={24} sm={24} md={24} lg={24} className="list-section">
           {data.map(item => (
             <Card key={item.title} size="small" bordered={false}>
               <Meta avatar={item.icon} title={item.title} description={item.content} />
             </Card>
           ))}
-        </Col>
-        <Col span={12} xs={24} sm={24} md={24} lg={12}>
-          <NewsFeed />
         </Col>
       </Row>
       <LogTable logs={logs} initialPageSize={5} />
