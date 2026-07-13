@@ -1,5 +1,6 @@
 import React, { FC, useEffect, useRef } from 'react';
 import { createPicker } from 'picmo';
+import type { Emoji } from 'emojibase';
 
 export type EmojiPickerProps = {
   onEmojiSelect: (emoji: string) => void;
@@ -12,20 +13,34 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
   onCustomEmojiSelect,
   customEmoji,
 }) => {
-  const ref = useRef();
+  const ref = useRef<HTMLDivElement>();
 
-  // Recreate the emoji picker when the custom emoji changes.
+  // We only use custom emoji, so:
+  //  - `categories: ['custom']` hides the built-in native-emoji tabs.
+  //  - Passing empty static `emojiData` + `messages` makes picmo populate its
+  //    data store from these instead of fetching the emojibase dataset from
+  //    the jsDelivr CDN (which is unreliable in some regions and was the
+  //    cause of slow emoji loading). Custom emojis render independently of
+  //    this store, so empty native data is safe.
+  // The picker is recreated when `customEmoji` changes (it is fetched
+  // asynchronously) so we never render an empty custom category.
   useEffect(() => {
-    const e = customEmoji.map(emoji => ({
+    const root = ref.current;
+    root.innerHTML = '';
+
+    const custom = customEmoji.map(emoji => ({
       emoji: emoji.name,
       label: emoji.name,
       url: emoji.url,
     }));
 
     const picker = createPicker({
-      rootElement: ref.current,
-      custom: e,
+      rootElement: root,
+      custom,
       initialCategory: 'custom',
+      categories: ['custom'],
+      emojiData: [] as Emoji[],
+      messages: { groups: [], skinTones: [], subgroups: [] },
       showPreview: false,
       showRecents: true,
     });
@@ -36,7 +51,11 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
         onEmojiSelect(event.emoji);
       }
     });
-  }, []);
+
+    return () => {
+      picker.destroy();
+    };
+  }, [customEmoji]);
 
   return <div ref={ref} />;
 };

@@ -7,7 +7,6 @@ import { Layout, Menu, Alert, Button, Space, Tooltip } from 'antd';
 
 import classNames from 'classnames';
 import dynamic from 'next/dynamic';
-import { upgradeVersionAvailable } from '../../utils/apis';
 import { parseSecondsToDurationString } from '../../utils/format';
 
 import { OwncastLogo } from '../common/OwncastLogo/OwncastLogo';
@@ -68,7 +67,7 @@ export type MainLayoutProps = {
 
 export const MainLayout: FC<MainLayoutProps> = ({ children }) => {
   const context = useContext(ServerStatusContext);
-  const { serverConfig, online, broadcaster, versionNumber, error: serverError } = context || {};
+  const { serverConfig, online, broadcaster, error: serverError } = context || {};
   const { instanceDetails, chatDisabled, federation } = serverConfig;
   const { enabled: federationEnabled } = federation;
 
@@ -81,20 +80,6 @@ export const MainLayout: FC<MainLayoutProps> = ({ children }) => {
   const { route } = router || {};
 
   const { Header, Footer, Content, Sider } = Layout;
-
-  const [upgradeVersion, setUpgradeVersion] = useState('');
-  const checkForUpgrade = async () => {
-    try {
-      const result = await upgradeVersionAvailable(versionNumber);
-      setUpgradeVersion(result);
-    } catch (error) {
-      console.log('==== error', error);
-    }
-  };
-
-  useEffect(() => {
-    checkForUpgrade();
-  }, [versionNumber]);
 
   useEffect(() => {
     setCurrentStreamTitle(instanceDetails.streamTitle);
@@ -113,9 +98,7 @@ export const MainLayout: FC<MainLayoutProps> = ({ children }) => {
     online,
   });
 
-  const upgradeVersionString = `${upgradeVersion}` || '';
-  const upgradeMessage = `Upgrade to v${upgradeVersionString}`;
-  const openMenuItems = upgradeVersion ? ['utilities-menu'] : [];
+  const openMenuItems: string[] = [];
 
   const clearAlertMessage = () => {
     alertMessage.setMessage(null);
@@ -265,10 +248,6 @@ export const MainLayout: FC<MainLayoutProps> = ({ children }) => {
       label: 'Integrations',
       icon: <ExperimentOutlined />,
       children: integrationsMenu,
-    },
-    upgradeVersion && {
-      key: '/admin/upgrade',
-      label: <Link href="/admin/upgrade">{upgradeMessage}</Link>,
     },
   ];
 
