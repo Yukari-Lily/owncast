@@ -10,8 +10,7 @@ export type EmojiPickerProps = {
 
 type EmojiRef = { name: string; url: string };
 
-const RECENTS_KEY = 'owncast_emoji_recents';
-const MAX_RECENTS = 20;
+const MAX_RECENTS = 5;
 const ALL = '__all__';
 const RECENT = '__recent__';
 const EMPTY: EmojiRef[] = [];
@@ -53,16 +52,6 @@ function ensureCryptoSubtleAvailable() {
 function folderOf(url: string): string {
   const m = String(url).match(/\/img\/emoji\/([^/]+)/);
   return m ? m[1] : '其他';
-}
-
-function loadRecents(): EmojiRef[] {
-  try {
-    const raw = localStorage.getItem(RECENTS_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed.slice(0, MAX_RECENTS) : [];
-  } catch {
-    return [];
-  }
 }
 
 // picmo's built-in "recents" category icon (Font Awesome clock), used for the
@@ -120,7 +109,6 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
 }) => {
   const ref = useRef<HTMLDivElement>();
   const [activeGroup, setActiveGroup] = useState<string>(ALL);
-  const [recents, setRecents] = useState<EmojiRef[]>(() => loadRecents());
 
   // Group custom emoji by their emoji folder (derived from the URL path).
   // A Map preserves insertion order, which matches the server's WalkDir order
@@ -141,31 +129,23 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
 
   const folderNames = useMemo(() => Array.from(groups.keys()), [groups]);
 
-  // The set of emojis picmo should render for the active tab. Returns stable
-  // references (the prop array / the memoized group array / the recents state)
-  // so the picker only recreates when the visible set actually changes -- not
-  // on every emoji select while on the "All" or a folder tab.
+  // The custom emojis to hand to picmo for the active tab. For the "最近" tab we
+  // pass none (picmo's built-in recents category is shown instead). Returns
+  // stable references so the picker only recreates when the tab or the data
+  // actually changes -- not on every emoji select.
   const activeEmojis = useMemo<EmojiRef[]>(() => {
+    if (activeGroup === RECENT) return EMPTY;
     if (activeGroup === ALL) return customEmoji as EmojiRef[];
-    if (activeGroup === RECENT) return recents;
     return groups.get(activeGroup) || EMPTY;
-  }, [activeGroup, customEmoji, recents, groups]);
+  }, [activeGroup, customEmoji, groups]);
 
-  const addToRecents = (emoji: EmojiRef) => {
-    setRecents(prev => {
-      const next = [emoji, ...prev.filter(r => r.url !== emoji.url)].slice(0, MAX_RECENTS);
-      try {
-        localStorage.setItem(RECENTS_KEY, JSON.stringify(next));
-      } catch {
-        // ignore
-      }
-      return next;
-    });
-  };
-
-  // picmo is configured to render only the custom-emoji grid (no native emoji,
-  // no category tabs, no search, no recents). The category tab bar above is
-  // our own. The picker is recreated when the visible set changes.
+  // picmo is configured per tab:
+  //  - "最近": show only picmo's recents category (initialCategory 'recents').
+  //  - "所有": show recents (top) + all custom, default scrolled to custom so
+  //    scrolling up reveals the recents. recents only live here, not in folders.
+  //  - folder: show only that folder's custom emojis (no recents).
+  // The picker is recreated when the tab or the visible set changes. recents
+  // are managed by picmo itself (maxRecents, persisted in localStorage).
   useEffect(() => {
     ensureCryptoSubtleAvailable();
 
@@ -178,22 +158,34 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
       url: e.url,
     }));
 
+    const isRecent = activeGroup === RECENT;
+    const isAll = activeGroup === ALL;
+
+    let categories: ('recents' | 'custom')[];
+    if (isRecent) {
+      categories = ['recents'];
+    } else if (isAll) {
+      categories = ['recents', 'custom'];
+    } else {
+      categories = ['custom'];
+    }
+
     const picker = createPicker({
       rootElement: root,
       custom,
-      initialCategory: 'custom',
-      categories: ['custom'],
+      initialCategory: isRecent ? 'recents' : 'custom',
+      categories,
+      maxRecents: MAX_RECENTS,
       emojiData: [] as Emoji[],
       messages: { groups: [], skinTones: [], subgroups: [] },
       showPreview: false,
-      showRecents: false,
+      showRecents: isRecent || isAll,
       showCategoryTabs: false,
       showSearch: false,
     });
     picker.addEventListener('emoji:select', event => {
       if (event.url) {
         onCustomEmojiSelect(event.label, event.url);
-        addToRecents({ name: event.label, url: event.url });
       } else {
         onEmojiSelect(event.emoji);
       }
@@ -207,8 +199,8 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
         console.warn('Failed to destroy emoji picker', e);
       }
     };
-    // Recreate only when the visible emoji set changes.
-  }, [activeEmojis]);
+    // Recreate only when the tab or the visible emoji set changes.
+  }, [activeEmojis, activeGroup]);
 
   // Tab list: [最近] [所有] [<folder>...]. "最近" uses a clock icon, "所有"
   // uses a grid icon, and each folder tab uses its first emoji as a thumbnail.
