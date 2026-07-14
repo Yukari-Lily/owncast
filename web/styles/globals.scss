@@ -140,17 +140,27 @@ body {
   display: none !important;
 }
 
-// With the header gone, the height it reserved (category-name-height) would
-// leave a blank strip at the bottom while the grid sits flush at the top --
-// uneven all around. Drop that reserved height and add a small symmetric
-// padding so all four sides of the grid match (0.5em, same as the left/right
-// the emoji container already has).
-.emoji-single-category .picmo__picker {
+// Keep the emoji area a constant height across tabs so the box doesn't jump
+// when switching ("所有" has two visible headers, single-category tabs hide
+// theirs, which would otherwise make "所有" taller). `rows + 1em` matches the
+// single-category grid plus its 0.5em top/bottom padding, with no
+// header-reserved height.
+.picmo__picker {
   --emoji-area-height: calc(
     (var(--row-count) * var(--emoji-size) * var(--emoji-size-multiplier)) + 1em
   ) !important;
 }
+
+// On single-category tabs the header is hidden, so add symmetric padding around
+// the grid so all four sides match (0.5em, same as the left/right the emoji
+// container already has).
 .emoji-single-category .picmo__emojiContainer {
   padding-top: 0.5em !important;
   padding-bottom: 0.5em !important;
+}
+
+// Subtle hover for inactive emoji category tabs (the active tab keeps its accent
+// border). Semi-transparent gray works on both light and dark themes.
+.emoji-tab:not(.emoji-tab-active):hover {
+  background: rgba(127, 127, 127, 0.15);
 }
