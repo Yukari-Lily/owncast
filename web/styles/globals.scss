@@ -139,3 +139,18 @@ body {
 .emoji-single-category .picmo__categoryName {
   display: none !important;
 }
+
+// With the header gone, the height it reserved (category-name-height) would
+// leave a blank strip at the bottom while the grid sits flush at the top --
+// uneven all around. Drop that reserved height and add a small symmetric
+// padding so all four sides of the grid match (0.5em, same as the left/right
+// the emoji container already has).
+.emoji-single-category .picmo__picker {
+  --emoji-area-height: calc(
+    (var(--row-count) * var(--emoji-size) * var(--emoji-size-multiplier)) + 1em
+  ) !important;
+}
+.emoji-single-category .picmo__emojiContainer {
+  padding-top: 0.5em !important;
+  padding-bottom: 0.5em !important;
+}
