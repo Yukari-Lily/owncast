@@ -277,6 +277,7 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
         {enabled && (
           <div style={{ display: 'flex', paddingLeft: '5px' }}>
             <Popover
+              overlayClassName="emoji-popover"
               content={
                 <EmojiPicker
                   customEmoji={customEmoji}

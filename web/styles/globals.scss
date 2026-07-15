@@ -132,9 +132,17 @@ body {
   vertical-align: middle;
 }
 
+// Remove antd's default inner padding on the emoji popover so the picker fills
+// the popover edge to edge. The scoped selector outranks antd's
+// `.ant-popover-inner-content` (higher specificity, loaded later), so no
+// `!important` is needed.
+.emoji-popover .ant-popover-inner-content {
+  padding: 0;
+}
+
 // Emoji picker: hide the per-category name header on single-category tabs
-// ("最近" and per-folder tabs). The "所有" tab shows recents + all (two
-// categories) and keeps both headers so the two sections can be told apart.
+// (per-folder tabs). The "所有" tab shows recents + all (two categories) and
+// keeps both headers so the two sections can be told apart.
 // `!important` is needed because picmo injects its own styles at runtime.
 .emoji-single-category .picmo__categoryName {
   display: none !important;

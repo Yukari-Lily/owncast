@@ -12,7 +12,6 @@ type EmojiRef = { name: string; url: string };
 
 const MAX_RECENTS = 5;
 const ALL = '__all__';
-const RECENT = '__recent__';
 const EMPTY: EmojiRef[] = [];
 
 // picmo hashes the emoji dataset with crypto.subtle.digest to detect changes.
@@ -54,21 +53,6 @@ function folderOf(url: string): string {
   return m ? m[1] : '其他';
 }
 
-// picmo's built-in "recents" category icon (Font Awesome clock), used for the
-// recents tab so it matches the picker's native iconography.
-const RecentsIcon = () => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    viewBox="0 0 512 512"
-    fill="currentColor"
-    width="20"
-    height="20"
-    aria-hidden="true"
-  >
-    <path d="M256 512C114.6 512 0 397.4 0 256C0 114.6 114.6 0 256 0C397.4 0 512 114.6 512 256C512 397.4 397.4 512 256 512zM232 256C232 264 236 271.5 242.7 275.1L338.7 339.1C349.7 347.3 364.6 344.3 371.1 333.3C379.3 322.3 376.3 307.4 365.3 300L280 243.2V120C280 106.7 269.3 96 255.1 96C242.7 96 231.1 106.7 231.1 120L232 256z" />
-  </svg>
-);
-
 // A 2x2 grid icon for the "all" tab (browse the full emoji grid).
 const AllIcon = () => (
   <svg
@@ -86,15 +70,15 @@ const AllIcon = () => (
   </svg>
 );
 
-// SVG markup strings for the category-name headers under the "所有" tab. They
-// match the RecentsIcon / AllIcon tab icons above (used via innerHTML when
-// rewriting picmo's headers, see customizeCategoryHeader).
+// SVG markup for the category-name headers under the "ALL" tab, used via
+// innerHTML when rewriting picmo's headers (see customizeCategoryHeader).
+// ALL_ICON_SVG matches the AllIcon tab icon above.
 const RECENTS_ICON_SVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor" width="18" height="18" aria-hidden="true"><path d="M256 512C114.6 512 0 397.4 0 256C0 114.6 114.6 0 256 0C397.4 0 512 114.6 512 256C512 397.4 397.4 512 256 512zM232 256C232 264 236 271.5 242.7 275.1L338.7 339.1C349.7 347.3 364.6 344.3 371.1 333.3C379.3 322.3 376.3 307.4 365.3 300L280 243.2V120C280 106.7 269.3 96 255.1 96C242.7 96 231.1 106.7 231.1 120L232 256z" /></svg>';
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor" width="14" height="14" aria-hidden="true"><path d="M256 512C114.6 512 0 397.4 0 256C0 114.6 114.6 0 256 0C397.4 0 512 114.6 512 256C512 397.4 397.4 512 256 512zM232 256C232 264 236 271.5 242.7 275.1L338.7 339.1C349.7 347.3 364.6 344.3 371.1 333.3C379.3 322.3 376.3 307.4 365.3 300L280 243.2V120C280 106.7 269.3 96 255.1 96C242.7 96 231.1 106.7 231.1 120L232 256z" /></svg>';
 const ALL_ICON_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1.5" /><rect x="13" y="3" width="8" height="8" rx="1.5" /><rect x="3" y="13" width="8" height="8" rx="1.5" /><rect x="13" y="13" width="8" height="8" rx="1.5" /></svg>';
 
-// Under the "所有" tab, swap picmo's default category-name icon + label for our
+// Under the "ALL" tab, swap picmo's default category-name icon + label for our
 // own so the two sections match the tab icons. Only touches the icon element
 // and the label text node, leaving anything else (e.g. a clear button) intact.
 function customizeCategoryHeader(h3: Element | null, iconSvg: string, label: string) {
@@ -158,19 +142,16 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
 
   const folderNames = useMemo(() => Array.from(groups.keys()), [groups]);
 
-  // The custom emojis to hand to picmo for the active tab. For the "最近" tab we
-  // pass none (picmo's built-in recents category is shown instead). Returns
-  // stable references so the picker only recreates when the tab or the data
-  // actually changes -- not on every emoji select.
+  // The custom emojis to hand to picmo for the active tab. Returns stable
+  // references so the picker only recreates when the tab or the data actually
+  // changes -- not on every emoji select.
   const activeEmojis = useMemo<EmojiRef[]>(() => {
-    if (activeGroup === RECENT) return EMPTY;
     if (activeGroup === ALL) return customEmoji as EmojiRef[];
     return groups.get(activeGroup) || EMPTY;
   }, [activeGroup, customEmoji, groups]);
 
   // picmo is configured per tab:
-  //  - "最近": show only picmo's recents category (initialCategory 'recents').
-  //  - "所有": show recents (top) + all custom, default scrolled to custom so
+  //  - "ALL": show recents (top) + all custom, default scrolled to custom so
   //    scrolling up reveals the recents. recents only live here, not in folders.
   //  - folder: show only that folder's custom emojis (no recents).
   // The picker is recreated when the tab or the visible set changes. recents
@@ -187,28 +168,18 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
       url: e.url,
     }));
 
-    const isRecent = activeGroup === RECENT;
     const isAll = activeGroup === ALL;
-
-    let categories: ('recents' | 'custom')[];
-    if (isRecent) {
-      categories = ['recents'];
-    } else if (isAll) {
-      categories = ['recents', 'custom'];
-    } else {
-      categories = ['custom'];
-    }
 
     const picker = createPicker({
       rootElement: root,
       custom,
-      initialCategory: isRecent ? 'recents' : 'custom',
-      categories,
+      initialCategory: 'custom',
+      categories: isAll ? ['recents', 'custom'] : ['custom'],
       maxRecents: MAX_RECENTS,
       emojiData: [] as Emoji[],
       messages: { groups: [], skinTones: [], subgroups: [] },
       showPreview: false,
-      showRecents: isRecent || isAll,
+      showRecents: isAll,
       showCategoryTabs: false,
       showSearch: false,
     });
@@ -220,7 +191,7 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
       }
     });
 
-    // Under the "所有" tab, relabel the two category headers (recents / all) to
+    // Under the "ALL" tab, relabel the two category headers (recents / all) to
     // match the tab icons. Other tabs hide the single header via CSS.
     if (isAll) {
       picker.addEventListener('data:ready', () => {
@@ -248,8 +219,8 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
     // Recreate only when the tab or the visible emoji set changes.
   }, [activeEmojis, activeGroup]);
 
-  // Tab list: [最近] [所有] [<folder>...]. "最近" uses a clock icon, "所有"
-  // uses a grid icon, and each folder tab uses its first emoji as a thumbnail.
+  // Tab list: [ALL] [<folder>...]. "ALL" uses a grid icon, and each folder
+  // tab uses its first emoji as a thumbnail.
   const tabs = useMemo<
     Array<{ key: string; label: string; thumb?: string; icon?: React.ReactNode }>
   >(() => {
@@ -258,11 +229,7 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
       label: f,
       thumb: groups.get(f)?.[0]?.url,
     }));
-    return [
-      { key: RECENT, label: '最近', icon: <RecentsIcon /> },
-      { key: ALL, label: '所有', icon: <AllIcon /> },
-      ...folderTabs,
-    ];
+    return [{ key: ALL, label: 'ALL', icon: <AllIcon /> }, ...folderTabs];
   }, [folderNames, groups]);
 
   return (
