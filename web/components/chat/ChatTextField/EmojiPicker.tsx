@@ -166,6 +166,10 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
       emoji: e.name,
       label: e.name,
       url: e.url,
+      // picmo dedupes recents by `hexcode`; custom emojis have none, so without
+      // this every select wipes the recents (all undefined === undefined). Use
+      // the URL as a stable unique key.
+      hexcode: e.url,
     }));
 
     const isAll = activeGroup === ALL;
