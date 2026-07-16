@@ -10,7 +10,7 @@ export type EmojiPickerProps = {
 
 type EmojiRef = { name: string; url: string };
 
-const MAX_RECENTS = 5;
+const MAX_RECENTS = 20;
 const ALL = '__all__';
 const EMPTY: EmojiRef[] = [];
 
