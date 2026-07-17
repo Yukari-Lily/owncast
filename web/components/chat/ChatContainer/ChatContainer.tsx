@@ -85,7 +85,6 @@ export const ChatContainer: FC<ChatContainerProps> = ({
   focusInput = true,
 }) => {
   const [showScrollToBottomButton, setShowScrollToBottomButton] = useState(false);
-  const [isAtBottom, setIsAtBottom] = useState(false);
 
   const chatContainerRef = useRef(null);
   const scrollToBottomDelay = useRef(null);
@@ -228,8 +227,6 @@ export const ChatContainer: FC<ChatContainerProps> = ({
     clearTimeout(scrollToBottomDelay.current);
     scrollToBottomDelay.current = setTimeout(() => {
       ref.current?.scrollTo({ top: Infinity, left: 0, behavior: 'auto' });
-
-      setIsAtBottom(true);
     }, 150);
     setShowScrollToBottomButton(false);
   };
@@ -254,10 +251,9 @@ export const ChatContainer: FC<ChatContainerProps> = ({
           data={messages}
           itemContent={(index, message) => getViewForMessage(index, message)}
           initialTopMostItemIndex={messages.length - 1}
-          followOutput={() => {
+          followOutput={isAtBottom => {
             if (isAtBottom) {
               setShowScrollToBottomButton(false);
-              scrollChatToBottom(chatContainerRef);
               return 'smooth';
             }
 
@@ -266,8 +262,6 @@ export const ChatContainer: FC<ChatContainerProps> = ({
           alignToBottom
           atBottomThreshold={70}
           atBottomStateChange={bottom => {
-            setIsAtBottom(bottom);
-
             if (bottom) {
               setShowScrollToBottomButton(false);
             } else {
@@ -284,7 +278,7 @@ export const ChatContainer: FC<ChatContainerProps> = ({
         )}
       </>
     ),
-    [messages, usernameToHighlight, chatUserId, isModerator, showScrollToBottomButton, isAtBottom],
+    [messages, usernameToHighlight, chatUserId, isModerator, showScrollToBottomButton],
   );
 
   const defaultChatWidth: number = 320;
