@@ -111,15 +111,18 @@ function customizeCategoryHeader(h3: Element | null, iconSvg: string, label: str
 // Workaround: remove the same-name entry from `emojis` by name *before*
 // picmo's addOrUpdate runs, so picmo's reference-based dedup has nothing to
 // miss; picmo then re-inserts e (fresh data) at the front. Patched once on
-// the recents container's prototype. Guarded + try/catch so a future picmo
-// with different internals just skips the patch instead of breaking.
+// the recents container's prototype. The WeakSet tracks which prototype
+// classes we've already patched (avoids both re-patching and a dangling-
+// underscore property on picmo's object). Guarded + try/catch so a future
+// picmo with different internals just skips the patch instead of breaking.
+const patchedRecentsContainers = new WeakSet();
 function patchPicmoRecentsDedup(picker) {
   try {
     const recentsCategory = picker?.emojiArea?.emojiCategories?.find(
       c => c?.category?.key === 'recents',
     );
     const RecentsContainer = recentsCategory?.emojiContainer?.constructor;
-    if (!RecentsContainer || RecentsContainer.prototype.__recentsDedupPatched) {
+    if (!RecentsContainer || patchedRecentsContainers.has(RecentsContainer)) {
       return;
     }
     const originalAddOrUpdate = RecentsContainer.prototype.addOrUpdate;
@@ -127,7 +130,7 @@ function patchPicmoRecentsDedup(picker) {
       this.emojis = this.emojis.filter(emoji => emoji.emoji !== e.emoji);
       return originalAddOrUpdate.call(this, e);
     };
-    RecentsContainer.prototype.__recentsDedupPatched = true;
+    patchedRecentsContainers.add(RecentsContainer);
   } catch {
     /* picmo internals changed -- skip the patch */
   }

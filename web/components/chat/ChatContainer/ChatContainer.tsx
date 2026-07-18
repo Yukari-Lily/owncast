@@ -273,7 +273,14 @@ export const ChatContainer: FC<ChatContainerProps> = ({
         atBottomStateChange={handleAtBottomStateChange}
       />
     ),
-    [messages, usernameToHighlight, chatUserId, isModerator, handleFollowOutput, handleAtBottomStateChange],
+    [
+      messages,
+      usernameToHighlight,
+      chatUserId,
+      isModerator,
+      handleFollowOutput,
+      handleAtBottomStateChange,
+    ],
   );
 
   const defaultChatWidth: number = 320;
