@@ -62,6 +62,8 @@ func GetServerConfig(w http.ResponseWriter, r *http.Request) {
 		VideoServingEndpoint:    data.GetVideoServingEndpoint(),
 		ChatEstablishedUserMode: data.GetChatEstbalishedUsersOnlyMode(),
 		HideViewerCount:         data.GetHideViewerCount(),
+		ViewerPasswordEnabled:   data.GetViewerPasswordEnabled(),
+		ViewerPassword:          maskPassword(data.GetViewerPassword()),
 		DisableSearchIndexing:   data.GetDisableSearchIndexing(),
 		VideoSettings: videoSettings{
 			VideoQualityVariants: videoQualityVariants,
@@ -125,6 +127,8 @@ type serverConfigAdminResponse struct {
 	DisableSearchIndexing   bool                        `json:"disableSearchIndexing"`
 	StreamKeyOverridden     bool                        `json:"streamKeyOverridden"`
 	HideViewerCount         bool                        `json:"hideViewerCount"`
+	ViewerPasswordEnabled   bool                        `json:"viewerPasswordEnabled"`
+	ViewerPassword          string                      `json:"viewerPassword"`
 }
 
 type videoSettings struct {
@@ -167,4 +171,14 @@ type federationConfigResponse struct {
 type notificationsConfigResponse struct {
 	Browser models.BrowserNotificationConfiguration `json:"browser"`
 	Discord models.DiscordConfiguration             `json:"discord"`
+}
+
+func maskPassword(password string) string {
+	if password == "" {
+		return ""
+	}
+	if len(password) <= 2 {
+		return "**"
+	}
+	return password[:2] + "***"
 }

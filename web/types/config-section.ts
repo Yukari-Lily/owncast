@@ -158,4 +158,6 @@ export interface ConfigDetails {
   chatEstablishedUserMode: boolean;
   hideViewerCount: boolean;
   disableSearchIndexing: boolean;
+  viewerPasswordEnabled: boolean;
+  viewerPassword: string;
 }

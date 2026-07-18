@@ -41,6 +41,8 @@ const API_CHAT_ESTABLISHED_MODE = '/chat/establishedusermode';
 const API_DISABLE_SEARCH_INDEXING = '/disablesearchindexing';
 const API_SOCKET_HOST_OVERRIDE = '/sockethostoverride';
 const API_VIDEO_SERVING_ENDPOINT = '/videoservingendpoint';
+const API_VIEWER_PASSWORD = '/viewerpassword';
+const API_VIEWER_PASSWORD_ENABLED = '/viewerpassword/enabled';
 
 // Federation
 const API_FEDERATION_ENABLED = '/federation/enable';
@@ -272,6 +274,24 @@ export const CHAT_ESTABLISHED_USER_MODE = {
   label: 'Established users only',
   tip: 'Only users who have previously been established for some time may chat.',
   useSubmit: true,
+};
+
+export const FIELD_PROPS_VIEWER_PASSWORD_ENABLED = {
+  apiPath: API_VIEWER_PASSWORD_ENABLED,
+  configPath: '',
+  label: 'Enable Viewer Password',
+  tip: 'When enabled, viewers must enter a password to access the stream and chat.',
+  useSubmit: true,
+};
+
+export const TEXTFIELD_PROPS_VIEWER_PASSWORD = {
+  apiPath: API_VIEWER_PASSWORD,
+  configPath: '',
+  maxLength: TEXT_MAXLENGTH,
+  placeholder: 'Enter viewer password',
+  label: 'Viewer Password',
+  tip: 'The password viewers must enter to access the stream.',
+  type: 'password',
 };
 
 export const TEXTFIELD_PROPS_CHAT_FORBIDDEN_USERNAMES = {

@@ -1,4 +1,4 @@
-import { FC, useContext, useEffect, useState } from 'react';
+import { FC, useContext, useEffect, useRef, useState } from 'react';
 import { atom, selector, useRecoilState, useSetRecoilState, RecoilEnv } from 'recoil';
 import { useMachine } from '@xstate/react';
 import { makeEmptyClientConfig, ClientConfig } from '../../interfaces/client-config.model';
@@ -33,12 +33,20 @@ RecoilEnv.RECOIL_DUPLICATE_ATOM_KEY_CHECKING_ENABLED = false;
 
 const SERVER_STATUS_POLL_DURATION = 5000;
 const ACCESS_TOKEN_KEY = 'accessToken';
+const VIEWER_AUTH_KEY = 'viewerAuthenticated';
+
+// Maximum number of chat messages retained client-side. Incoming chat, join,
+// part and system events are appended without limit otherwise, which makes the
+// per-message O(n) work (array copy, message filtering, collapse scan, renders)
+// grow over a long-lived page and steadily raise CPU. Trimming to the most
+// recent messages keeps that work bounded.
+const MAX_STORED_CHAT_MESSAGES = 500;
 
 let serverStatusRefreshPoll: ReturnType<typeof setInterval>;
 let hasBeenModeratorNotified = false;
 let hasWebsocketDisconnected = false;
 
-const serverConnectivityError = `Cannot connect to the Owncast service. Please check your internet connection and verify this Owncast server is running.`;
+const serverConnectivityError = `Cannot connect to the service. Please check your internet connection and try again later.`;
 
 // Server status is what gets updated such as viewer count, durations,
 // stream title, online/offline state, etc.
@@ -102,6 +110,16 @@ export const fatalErrorStateAtom = atom<DisplayableError>({
 export const clockSkewAtom = atom<Number>({
   key: 'clockSkewAtom',
   default: 0.0,
+});
+
+export const viewerAuthenticatedAtom = atom<boolean>({
+  key: 'viewerAuthenticatedAtom',
+  default: false,
+});
+
+export const viewerAuthCheckCompleteAtom = atom<boolean>({
+  key: 'viewerAuthCheckCompleteAtom',
+  default: false,
 });
 
 const removedMessageIdsAtom = atom<string[]>({
@@ -176,6 +194,10 @@ export const ClientConfigStore: FC = () => {
   const setWebsocketService = useSetRecoilState<WebsocketService>(websocketServiceAtom);
   const setHiddenMessageIds = useSetRecoilState<string[]>(removedMessageIdsAtom);
   const [hasLoadedConfig, setHasLoadedConfig] = useState(false);
+  const [viewerAuthenticated, setViewerAuthenticated] =
+    useRecoilState<boolean>(viewerAuthenticatedAtom);
+  const setViewerAuthCheckComplete = useSetRecoilState<boolean>(viewerAuthCheckCompleteAtom);
+  const registrationAttempted = useRef(false);
 
   let ws: WebsocketService;
 
@@ -209,12 +231,57 @@ export const ClientConfigStore: FC = () => {
     }
   };
 
+  const checkViewerAuthStatus = async () => {
+    try {
+      // Users with existing access token (custom username) are already known
+      const existingToken = getLocalStorage(ACCESS_TOKEN_KEY);
+      if (existingToken) {
+        setViewerAuthenticated(true);
+        setViewerAuthCheckComplete(true);
+        return;
+      }
+
+      // Check localStorage viewer auth flag
+      const savedAuth = getLocalStorage(VIEWER_AUTH_KEY);
+      if (savedAuth) {
+        setViewerAuthenticated(true);
+        setViewerAuthCheckComplete(true);
+        return;
+      }
+
+      // Fallback: check server-side cookie
+      const response = await fetch('/api/viewer/status');
+      if (!response.ok) {
+        setViewerAuthCheckComplete(true);
+        return;
+      }
+      const data = await response.json();
+      if (!data.passwordEnabled || data.authenticated) {
+        setViewerAuthenticated(true);
+        // Also save to localStorage for future visits
+        setLocalStorage(VIEWER_AUTH_KEY, 'true');
+      }
+    } catch (error) {
+      console.error('Failed to check viewer auth status:', error);
+    } finally {
+      setViewerAuthCheckComplete(true);
+    }
+  };
+
   const updateClientConfig = async () => {
     try {
       const config = await ClientConfigService.getConfig();
       setClientConfig(config);
       setGlobalFatalErrorMessage(null);
       setHasLoadedConfig(true);
+      // If viewer password is not enabled, mark as authenticated
+      if (!config.viewerPasswordEnabled) {
+        setViewerAuthenticated(true);
+        setViewerAuthCheckComplete(true);
+      } else {
+        // Check if already authenticated via cookie
+        checkViewerAuthStatus();
+      }
     } catch (error) {
       setGlobalFatalError('Unable to reach Owncast server', serverConnectivityError);
       console.error(`ClientConfigService -> getConfig() ERROR: \n`, error);
@@ -248,11 +315,17 @@ export const ClientConfigStore: FC = () => {
       return;
     }
 
+    if (registrationAttempted.current) {
+      return;
+    }
+    registrationAttempted.current = true;
+
     try {
       sendEvent([AppStateEvent.NeedsRegister]);
       const response = await ChatService.registerUser(optionalDisplayName);
       const { accessToken: newAccessToken, displayName: newDisplayName, displayColor } = response;
       if (!newAccessToken) {
+        registrationAttempted.current = false;
         return;
       }
 
@@ -264,6 +337,7 @@ export const ClientConfigStore: FC = () => {
       setAccessToken(newAccessToken);
       setLocalStorage(ACCESS_TOKEN_KEY, newAccessToken);
     } catch (e) {
+      registrationAttempted.current = false;
       sendEvent([AppStateEvent.Fail]);
       console.error(`ChatService -> registerUser() ERROR: \n${e}`);
     }
@@ -272,8 +346,21 @@ export const ClientConfigStore: FC = () => {
   const resetAndReAuth = () => {
     setLocalStorage(ACCESS_TOKEN_KEY, '');
     setAccessToken(null);
+    registrationAttempted.current = false;
     ws?.shutdown();
     handleUserRegistration();
+  };
+
+  const addChatMessage = (message: SocketEvent) => {
+    setChatMessages(currentState => {
+      if (message.id && currentState.some(m => m.id === message.id)) {
+        return currentState;
+      }
+      const next = [...currentState, message];
+      return next.length > MAX_STORED_CHAT_MESSAGES
+        ? next.slice(next.length - MAX_STORED_CHAT_MESSAGES)
+        : next;
+    });
   };
 
   const handleMessageVisibilityChange = (message: MessageVisibilityEvent) => {
@@ -307,38 +394,38 @@ export const ClientConfigStore: FC = () => {
         if (message as ChatEvent) {
           const m = new ChatEvent(message);
           if (!hasBeenModeratorNotified && m.user?.isModerator) {
-            setChatMessages(currentState => [...currentState, message as ChatEvent]);
+            addChatMessage(message as ChatEvent);
             hasBeenModeratorNotified = true;
           }
         }
 
         break;
       case MessageType.CHAT:
-        setChatMessages(currentState => [...currentState, message as ChatEvent]);
+        addChatMessage(message as ChatEvent);
         break;
       case MessageType.NAME_CHANGE:
         handleNameChangeEvent(message as NameChangeEvent, setChatMessages, setCurrentUser);
         break;
       case MessageType.USER_JOINED:
-        setChatMessages(currentState => [...currentState, message as ChatEvent]);
+        addChatMessage(message as ChatEvent);
         break;
       case MessageType.USER_PARTED:
-        setChatMessages(currentState => [...currentState, message as ChatEvent]);
+        addChatMessage(message as ChatEvent);
         break;
       case MessageType.SYSTEM:
-        setChatMessages(currentState => [...currentState, message as ChatEvent]);
+        addChatMessage(message as ChatEvent);
         break;
       case MessageType.CHAT_ACTION:
-        setChatMessages(currentState => [...currentState, message as ChatEvent]);
+        addChatMessage(message as ChatEvent);
         break;
       case MessageType.FEDIVERSE_ENGAGEMENT_FOLLOW:
-        setChatMessages(currentState => [...currentState, message as FediverseEvent]);
+        addChatMessage(message as FediverseEvent);
         break;
       case MessageType.FEDIVERSE_ENGAGEMENT_LIKE:
-        setChatMessages(currentState => [...currentState, message as FediverseEvent]);
+        addChatMessage(message as FediverseEvent);
         break;
       case MessageType.FEDIVERSE_ENGAGEMENT_REPOST:
-        setChatMessages(currentState => [...currentState, message as FediverseEvent]);
+        addChatMessage(message as FediverseEvent);
         break;
       case MessageType.VISIBILITY_UPDATE:
         handleMessageVisibilityChange(message as MessageVisibilityEvent);
@@ -356,7 +443,11 @@ export const ClientConfigStore: FC = () => {
     try {
       const messages = await ChatService.getChatHistory(accessToken);
       if (messages) {
-        setChatMessages(currentState => [...currentState, ...messages]);
+        setChatMessages(currentState => {
+          const existingIds = new Set(currentState.map(m => m.id));
+          const newMessages = messages.filter(m => !m.id || !existingIds.has(m.id));
+          return [...currentState, ...newMessages];
+        });
       }
     } catch (error) {
       console.error(`ChatService -> getChatHistory() ERROR: \n${error}`);
@@ -397,6 +488,14 @@ export const ClientConfigStore: FC = () => {
         const config = JSON.parse((window as any).configHydration);
         setClientConfig(config);
         setHasLoadedConfig(true);
+        // If viewer password is not enabled, mark as authenticated
+        if (!config.viewerPasswordEnabled) {
+          setViewerAuthenticated(true);
+          setViewerAuthCheckComplete(true);
+        } else {
+          // Check if already authenticated via cookie
+          checkViewerAuthStatus();
+        }
       }
     } catch (e) {
       console.error('Error parsing config hydration', e);
@@ -464,6 +563,13 @@ export const ClientConfigStore: FC = () => {
       getChatHistory();
     }
   }, [accessToken]);
+
+  // When a new viewer authenticates via the password gate, register them for chat
+  useEffect(() => {
+    if (viewerAuthenticated && !accessToken) {
+      handleUserRegistration();
+    }
+  }, [viewerAuthenticated]);
 
   useEffect(() => {
     appStateService.onTransition(state => {

@@ -1,7 +1,7 @@
 /* eslint-disable react/no-invalid-html-attribute */
 /* eslint-disable react/no-danger */
 /* eslint-disable react/no-unescaped-entities */
-import { useRecoilValue } from 'recoil';
+import { useRecoilValue, useSetRecoilState } from 'recoil';
 import Head from 'next/head';
 import { FC, useEffect, useRef } from 'react';
 import { Layout } from 'antd';
@@ -15,6 +15,8 @@ import {
   fatalErrorStateAtom,
   appStateAtom,
   serverStatusState,
+  viewerAuthenticatedAtom,
+  viewerAuthCheckCompleteAtom,
 } from '../../stores/ClientConfigStore';
 import { Content } from '../../ui/Content/Content';
 import { Header } from '../../ui/Header/Header';
@@ -24,6 +26,7 @@ import setupNoLinkReferrer from '../../../utils/no-link-referrer';
 import { TitleNotifier } from '../../TitleNotifier/TitleNotifier';
 import { ServerRenderedHydration } from '../../ServerRendered/ServerRenderedHydration';
 import { Theme } from '../../theme/Theme';
+import { ViewerPasswordGate } from '../../modals/ViewerPasswordGate/ViewerPasswordGate';
 import styles from './Main.module.scss';
 import { PushNotificationServiceWorker } from '../../workers/PushNotificationServiceWorker/PushNotificationServiceWorker';
 import { AppStateOptions } from '../../stores/application-state';
@@ -53,6 +56,9 @@ export const Main: FC = () => {
   const { chatDisabled } = clientConfig;
   const { videoAvailable } = appState;
   const { online, streamTitle } = clientStatus;
+  const viewerAuthenticated = useRecoilValue<boolean>(viewerAuthenticatedAtom);
+  const viewerAuthCheckComplete = useRecoilValue<boolean>(viewerAuthCheckCompleteAtom);
+  const setViewerAuthenticated = useSetRecoilState(viewerAuthenticatedAtom);
 
   useEffect(() => {
     setupNoLinkReferrer(layoutRef.current);
@@ -60,6 +66,22 @@ export const Main: FC = () => {
 
   const isProduction = process.env.NODE_ENV === 'production';
   const headerText = online ? streamTitle || name : name;
+
+  const handleViewerAuthenticated = () => {
+    setViewerAuthenticated(true);
+  };
+
+  // If viewer password is enabled, not authenticated, and auth check is complete, show the gate
+  // Wait for auth check to complete to avoid flashing the gate for authenticated users
+  if (clientConfig.viewerPasswordEnabled && !viewerAuthenticated && viewerAuthCheckComplete) {
+    return (
+      <>
+        <ClientConfigStore />
+        <Theme />
+        <ViewerPasswordGate onAuthenticated={handleViewerAuthenticated} />
+      </>
+    );
+  }
 
   return (
     <>
@@ -139,7 +161,7 @@ export const Main: FC = () => {
         fallbackRender={({ error }) => (
           <FatalErrorStateModal
             title="Error"
-            message={`There was an unexpected error. Please refresh the page to retry. If this error continues please file a bug with the Owncast project: ${error}`}
+            message={`There was an unexpected error. Please refresh the page to retry. ${error}`}
           />
         )}
       >

@@ -624,6 +624,90 @@ func SetVideoCodec(w http.ResponseWriter, r *http.Request) {
 	controllers.WriteSimpleResponse(w, true, "video codec updated")
 }
 
+// SetViewerPassword will handle the web config request to set the viewer password.
+func SetViewerPassword(w http.ResponseWriter, r *http.Request) {
+	if !requirePOST(w, r) {
+		return
+	}
+
+	configValue, success := getValueFromRequest(w, r)
+	if !success {
+		return
+	}
+
+	value, ok := configValue.Value.(string)
+	if !ok {
+		controllers.WriteSimpleResponse(w, false, "invalid value type, expected string")
+		return
+	}
+
+	if err := data.SetViewerPassword(value); err != nil {
+		controllers.WriteSimpleResponse(w, false, err.Error())
+		return
+	}
+
+	controllers.WriteSimpleResponse(w, true, "changed")
+}
+
+// GetViewerPassword will return the current viewer password.
+func GetViewerPassword(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	type viewerPasswordResponse struct {
+		Value string `json:"value"`
+	}
+
+	response := viewerPasswordResponse{
+		Value: data.GetViewerPassword(),
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Errorln(err)
+	}
+}
+
+// SetViewerPasswordEnabled will handle the web config request to enable/disable viewer password.
+func SetViewerPasswordEnabled(w http.ResponseWriter, r *http.Request) {
+	if !requirePOST(w, r) {
+		return
+	}
+
+	configValue, success := getValueFromRequest(w, r)
+	if !success {
+		return
+	}
+
+	value, ok := configValue.Value.(bool)
+	if !ok {
+		controllers.WriteSimpleResponse(w, false, "invalid value type, expected boolean")
+		return
+	}
+
+	if err := data.SetViewerPasswordEnabled(value); err != nil {
+		controllers.WriteSimpleResponse(w, false, err.Error())
+		return
+	}
+
+	controllers.WriteSimpleResponse(w, true, "changed")
+}
+
+// GetViewerPasswordEnabled will return if viewer password is enabled.
+func GetViewerPasswordEnabled(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	type viewerPasswordEnabledResponse struct {
+		Value bool `json:"value"`
+	}
+
+	response := viewerPasswordEnabledResponse{
+		Value: data.GetViewerPasswordEnabled(),
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Errorln(err)
+	}
+}
+
 // SetExternalActions will set the 3rd party actions for the web interface.
 func SetExternalActions(w http.ResponseWriter, r *http.Request) {
 	type externalActionsRequest struct {

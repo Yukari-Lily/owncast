@@ -35,6 +35,7 @@ type webConfigResponse struct {
 	HideViewerCount      bool                         `json:"hideViewerCount"`
 	ChatDisabled         bool                         `json:"chatDisabled"`
 	NSFW                 bool                         `json:"nsfw"`
+	ViewerPasswordEnabled bool                        `json:"viewerPasswordEnabled"`
 	Authentication       authenticationConfigResponse `json:"authentication"`
 }
 
@@ -118,26 +119,27 @@ func getConfigResponse() webConfigResponse {
 	}
 
 	return webConfigResponse{
-		Name:                 data.GetServerName(),
-		Summary:              serverSummary,
-		OfflineMessage:       offlineMessage,
-		Logo:                 "/logo",
-		Tags:                 data.GetServerMetadataTags(),
-		Version:              config.GetReleaseString(),
-		NSFW:                 data.GetNSFW(),
-		SocketHostOverride:   data.GetWebsocketOverrideHost(),
-		ExtraPageContent:     pageContent,
-		StreamTitle:          data.GetStreamTitle(),
-		SocialHandles:        socialHandles,
-		ChatDisabled:         data.GetChatDisabled(),
-		ExternalActions:      data.GetExternalActions(),
-		CustomStyles:         data.GetCustomStyles(),
-		MaxSocketPayloadSize: config.MaxSocketPayloadSize,
-		Federation:           federationResponse,
-		Notifications:        notificationsResponse,
-		Authentication:       authenticationResponse,
-		AppearanceVariables:  data.GetCustomColorVariableValues(),
-		HideViewerCount:      data.GetHideViewerCount(),
+		Name:                  data.GetServerName(),
+		Summary:               serverSummary,
+		OfflineMessage:        offlineMessage,
+		Logo:                  "/logo",
+		Tags:                  data.GetServerMetadataTags(),
+		Version:               config.GetReleaseString(),
+		NSFW:                  data.GetNSFW(),
+		SocketHostOverride:    data.GetWebsocketOverrideHost(),
+		ExtraPageContent:      pageContent,
+		StreamTitle:           data.GetStreamTitle(),
+		SocialHandles:         socialHandles,
+		ChatDisabled:          data.GetChatDisabled(),
+		ExternalActions:       data.GetExternalActions(),
+		CustomStyles:          data.GetCustomStyles(),
+		MaxSocketPayloadSize:  config.MaxSocketPayloadSize,
+		Federation:            federationResponse,
+		Notifications:         notificationsResponse,
+		Authentication:        authenticationResponse,
+		AppearanceVariables:   data.GetCustomColorVariableValues(),
+		HideViewerCount:       data.GetHideViewerCount(),
+		ViewerPasswordEnabled: data.GetViewerPasswordEnabled() && data.GetViewerPassword() != "",
 	}
 }
 

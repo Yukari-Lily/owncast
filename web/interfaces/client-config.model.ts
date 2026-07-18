@@ -17,6 +17,7 @@ export interface ClientConfig {
   notifications: Notifications;
   authentication: Authentication;
   socketHostOverride?: string;
+  viewerPasswordEnabled?: boolean;
 }
 
 interface Authentication {
@@ -73,5 +74,6 @@ export function makeEmptyClientConfig(): ClientConfig {
     authentication: {
       indieAuthEnabled: false,
     },
+    viewerPasswordEnabled: false,
   };
 }

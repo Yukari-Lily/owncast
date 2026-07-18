@@ -59,6 +59,12 @@ func RegisterAnonymousChatUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check viewer password if enabled
+	if !CheckViewerAuth(r) {
+		WriteSimpleResponse(w, false, "viewer authentication required")
+		return
+	}
+
 	type registerAnonymousUserRequest struct {
 		DisplayName string `json:"displayName"`
 	}

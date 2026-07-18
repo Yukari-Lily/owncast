@@ -1,6 +1,10 @@
 package data
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -72,6 +76,8 @@ const (
 	streamKeysKey                        = "stream_keys"
 	disableSearchIndexingKey             = "disable_search_indexing"
 	videoServingEndpointKey              = "video_serving_endpoint"
+	viewerPasswordKey                    = "viewer_password"
+	viewerPasswordEnabledKey             = "viewer_password_enabled"
 )
 
 // GetExtraPageBodyContent will return the user-supplied body content.
@@ -988,4 +994,92 @@ func GetVideoServingEndpoint() string {
 // SetVideoServingEndpoint sets the custom video endpoint.
 func SetVideoServingEndpoint(message string) error {
 	return _datastore.SetString(videoServingEndpointKey, message)
+}
+
+// GetViewerPassword will return the viewer password.
+func GetViewerPassword() string {
+	password, _ := _datastore.GetString(viewerPasswordKey)
+	return password
+}
+
+// SetViewerPassword will set the viewer password.
+func SetViewerPassword(password string) error {
+	return _datastore.SetString(viewerPasswordKey, password)
+}
+
+// GetViewerPasswordEnabled will return if viewer password protection is enabled.
+func GetViewerPasswordEnabled() bool {
+	enabled, err := _datastore.GetBool(viewerPasswordEnabledKey)
+	if err != nil {
+		return false
+	}
+	return enabled
+}
+
+// SetViewerPasswordEnabled will set if viewer password protection is enabled.
+func SetViewerPasswordEnabled(enabled bool) error {
+	return _datastore.SetBool(viewerPasswordEnabledKey, enabled)
+}
+
+const (
+	// ViewerAuthCookieName is the name of the viewer auth cookie.
+	ViewerAuthCookieName   = "owncast_viewer_auth"
+	viewerAuthSecretKeyKey = "viewer_auth_secret_key"
+)
+
+// getViewerAuthSecretKey returns the per-installation HMAC secret, generating one if needed.
+func getViewerAuthSecretKey() string {
+	key, _ := _datastore.GetString(viewerAuthSecretKeyKey)
+	if key == "" {
+		// Generate a random 32-byte secret
+		randomBytes := make([]byte, 32)
+		for i := range randomBytes {
+			randomBytes[i] = byte(i) // will be overwritten by crypto/rand
+		}
+		// Use the existing utils function for random string generation
+		newKey, err := utils.GenerateRandomString(64)
+		if err != nil {
+			log.Errorln("Failed to generate viewer auth secret key:", err)
+			return "fallback_secret_do_not_use_in_production"
+		}
+		if err := _datastore.SetString(viewerAuthSecretKeyKey, newKey); err != nil {
+			log.Errorln("Failed to save viewer auth secret key:", err)
+		}
+		return newKey
+	}
+	return key
+}
+
+// GenerateViewerAuthCookieValue generates the HMAC cookie value for viewer auth.
+func GenerateViewerAuthCookieValue() string {
+	password := GetViewerPassword()
+	secretKey := getViewerAuthSecretKey()
+	mac := hmac.New(sha256.New, []byte(secretKey))
+	mac.Write([]byte(password))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// ValidateViewerAuthCookieValue validates a viewer auth cookie value.
+func ValidateViewerAuthCookieValue(cookieValue string) bool {
+	expected := GenerateViewerAuthCookieValue()
+	return hmac.Equal([]byte(cookieValue), []byte(expected))
+}
+
+// CheckViewerAuthCookie checks if the request has a valid viewer auth cookie.
+func CheckViewerAuthCookie(r *http.Request) bool {
+	if !GetViewerPasswordEnabled() {
+		return true
+	}
+
+	// If password is not set, allow access
+	if GetViewerPassword() == "" {
+		return true
+	}
+
+	cookie, err := r.Cookie(ViewerAuthCookieName)
+	if err != nil || cookie == nil || cookie.Value == "" {
+		return false
+	}
+
+	return ValidateViewerAuthCookieValue(cookie.Value)
 }

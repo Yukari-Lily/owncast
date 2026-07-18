@@ -336,6 +336,26 @@ func Start() error {
 	// set disabling of search indexing
 	http.HandleFunc("/api/admin/config/disablesearchindexing", middleware.RequireAdminAuth(admin.SetDisableSearchIndexing))
 
+	// Viewer password
+	http.HandleFunc("/api/admin/config/viewerpassword", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			middleware.RequireAdminAuth(admin.GetViewerPassword)(w, r)
+		} else {
+			middleware.RequireAdminAuth(admin.SetViewerPassword)(w, r)
+		}
+	})
+	http.HandleFunc("/api/admin/config/viewerpassword/enabled", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			middleware.RequireAdminAuth(admin.GetViewerPasswordEnabled)(w, r)
+		} else {
+			middleware.RequireAdminAuth(admin.SetViewerPasswordEnabled)(w, r)
+		}
+	})
+
+	// Viewer password auth
+	http.HandleFunc("/api/viewer/auth", controllers.VerifyViewerPassword)
+	http.HandleFunc("/api/viewer/status", controllers.GetViewerAuthStatus)
+
 	// Inline chat moderation actions
 
 	// Update chat message visibility
