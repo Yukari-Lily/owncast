@@ -5,6 +5,7 @@ WORKDIR /build/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
+ENV NEXT_PUBLIC_API_HOST="/"
 RUN npm run build
 
 # Stage 2: Copy built frontend to static directory
@@ -33,16 +34,16 @@ RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -ldflags "-extldflag
 
 # Stage 4: Final runtime image
 FROM alpine:3.19.1
-RUN apk update && apk add --no-cache ffmpeg ffmpeg-libs ca-certificates && update-ca-certificates
+RUN apk update && apk add --no-cache ffmpeg ffmpeg-libs ca-certificates su-exec && update-ca-certificates
 
 RUN addgroup -g 101 -S owncast && adduser -u 101 -S owncast -G owncast
 
 WORKDIR /app
 COPY --from=build /build/owncast /app/owncast
-RUN mkdir -p /app/data && chown -R owncast:owncast /app
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh && mkdir -p /app/data
 
 VOLUME /app/data
 
-USER owncast
-ENTRYPOINT ["/app/owncast"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 EXPOSE 8080 1935
