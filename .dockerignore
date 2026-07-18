@@ -1,0 +1,25 @@
+# Version control
+.git
+.github
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+LICENSE
+
+# Frontend dev files
+web/node_modules/
+web/.next/
+web/.storybook/
+web/stories/
+web/tests/
+web/docs/
+web/.env*
+
+# Go test files
+**/*_test.go
+
+# Runtime data
+data/
+*.db
