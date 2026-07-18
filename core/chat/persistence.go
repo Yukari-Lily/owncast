@@ -16,8 +16,8 @@ import (
 var _datastore *data.Datastore
 
 const (
-	maxBacklogHours  = 2  // Keep backlog max hours worth of messages
-	maxBacklogNumber = 50 // Return max number of messages in history request
+	maxBacklogHours  = 24  // Keep backlog max hours worth of messages
+	maxBacklogNumber = 200 // Return max number of messages in history request
 )
 
 func setupPersistence() {
