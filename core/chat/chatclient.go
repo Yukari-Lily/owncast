@@ -8,7 +8,6 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/time/rate"
 
 	"github.com/gorilla/websocket"
 	"github.com/owncast/owncast/config"
@@ -19,13 +18,11 @@ import (
 
 // Client represents a single chat client.
 type Client struct {
-	ConnectedAt  time.Time `json:"connectedAt"`
-	timeoutTimer *time.Timer
-	rateLimiter  *rate.Limiter
-	conn         *websocket.Conn
-	User         *user.User `json:"user"`
-	server       *Server
-	Geo          *geoip.GeoDetails `json:"geo"`
+	ConnectedAt time.Time `json:"connectedAt"`
+	conn        *websocket.Conn
+	User        *user.User `json:"user"`
+	server      *Server
+	Geo         *geoip.GeoDetails `json:"geo"`
 	// Buffered channel of outbound messages.
 	send         chan []byte
 	accessToken  string
@@ -34,7 +31,6 @@ type Client struct {
 	MessageCount int    `json:"messageCount"`
 	Id           uint   `json:"-"`
 	mu           sync.RWMutex
-	inTimeout    bool
 }
 
 type chatClientEvent struct {
@@ -87,10 +83,6 @@ func (c *Client) sendConnectedClientInfo() {
 }
 
 func (c *Client) readPump() {
-	// Allow 3 messages every two seconds.
-	limit := rate.Every(2 * time.Second / 3)
-	c.rateLimiter = rate.NewLimiter(limit, 1)
-
 	defer func() {
 		c.close()
 	}()
@@ -113,19 +105,6 @@ func (c *Client) readPump() {
 		// Throw away messages greater than max message size.
 		if len(message) > maxMessageSize {
 			c.sendAction("Sorry, that message exceeded the maximum size and can't be delivered.")
-			continue
-		}
-
-		// Check if this client is temporarily blocked from sending messages.
-		if c.inTimeout {
-			continue
-		}
-
-		// Guard against floods.
-		if !c.passesRateLimit() {
-			log.Warnln("Client", c.Id, c.User.DisplayName, "has exceeded the messaging rate limiting thresholds and messages are being rejected temporarily.")
-			c.startChatRejectionTimeout()
-
 			continue
 		}
 
@@ -199,26 +178,6 @@ func (c *Client) close() {
 	}
 }
 
-func (c *Client) passesRateLimit() bool {
-	return c.User.IsModerator() || (c.rateLimiter.Allow() && !c.inTimeout)
-}
-
-func (c *Client) startChatRejectionTimeout() {
-	if c.timeoutTimer != nil {
-		return
-	}
-
-	c.inTimeout = true
-	c.timeoutTimer = time.NewTimer(10 * time.Second)
-	go func(c *Client) {
-		for range c.timeoutTimer.C {
-			c.inTimeout = false
-			c.timeoutTimer = nil
-		}
-	}(c)
-
-	c.sendAction("You are temporarily blocked from sending chat messages due to perceived flooding.")
-}
 
 func (c *Client) sendPayload(payload interface{}) {
 	var data []byte
