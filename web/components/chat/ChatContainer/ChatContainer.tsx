@@ -240,15 +240,21 @@ export const ChatContainer: FC<ChatContainerProps> = ({
     }, 500);
   }, []);
 
-  // followOutput / atBottomStateChange are kept stable so the <Virtuoso>
-  // element isn't recreated (and Virtuoso's followOutput stream doesn't
-  // re-emit) when an unrelated re-render happens during a scroll. Re-creating
-  // the element mid-scroll re-arms Virtuoso's trapNextSizeIncrease, which then
-  // fires an instant scrollToBottom("auto") on the next size increase and
-  // produces the visible two-stage scroll (smooth, then snap to bottom).
+  // followOutput / atBottomStateChange are kept stable (useCallback, empty
+  // deps) so the <Virtuoso> element isn't recreated on unrelated re-renders.
+  //
+  // Return 'auto' (instant) rather than 'smooth' when at the bottom. 'smooth'
+  // can't keep up with rapid updates: the browser's smooth-scroll animation
+  // targets a position that goes stale when the next message (or a join/part
+  // event) extends the list mid-animation, or when a tall message triggers a
+  // layout shift (alignToBottom padding collapse / input resize) -- either way
+  // the viewport ends up a line short or scrolls in two stages. 'auto' jumps
+  // instantly to the latest item, and Virtuoso's pendingScrollHandle already
+  // collapses a burst into a single scroll to the last message, so bursts land
+  // on the true bottom in one motion.
   const handleFollowOutput = useCallback((isAtBottom: boolean) => {
     if (isAtBottom) {
-      return 'smooth' as const;
+      return 'auto' as const;
     }
     return false;
   }, []);
