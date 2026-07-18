@@ -99,6 +99,40 @@ function customizeCategoryHeader(h3: Element | null, iconSvg: string, label: str
   });
 }
 
+// picmo's recents container dedupes its `emojis` array by *reference*
+// (!== e) inside addOrUpdate. But a custom emoji clicked from the "custom"
+// category is a different object reference than the same emoji loaded into
+// recents from localStorage, so the dedup silently fails and leaves a
+// duplicate. The subsequent slice(0, maxRecents) then drops the oldest entry
+// from the `emojis` array while its DOM button stays put -- clicking that
+// orphaned button finds no match in picmo's event lookup, so emoji:select
+// never fires and the last (maxRecents-th) recent can't be sent.
+//
+// Workaround: remove the same-name entry from `emojis` by name *before*
+// picmo's addOrUpdate runs, so picmo's reference-based dedup has nothing to
+// miss; picmo then re-inserts e (fresh data) at the front. Patched once on
+// the recents container's prototype. Guarded + try/catch so a future picmo
+// with different internals just skips the patch instead of breaking.
+function patchPicmoRecentsDedup(picker) {
+  try {
+    const recentsCategory = picker?.emojiArea?.emojiCategories?.find(
+      c => c?.category?.key === 'recents',
+    );
+    const RecentsContainer = recentsCategory?.emojiContainer?.constructor;
+    if (!RecentsContainer || RecentsContainer.prototype.__recentsDedupPatched) {
+      return;
+    }
+    const originalAddOrUpdate = RecentsContainer.prototype.addOrUpdate;
+    RecentsContainer.prototype.addOrUpdate = async function addOrUpdate(e) {
+      this.emojis = this.emojis.filter(emoji => emoji.emoji !== e.emoji);
+      return originalAddOrUpdate.call(this, e);
+    };
+    RecentsContainer.prototype.__recentsDedupPatched = true;
+  } catch {
+    /* picmo internals changed -- skip the patch */
+  }
+}
+
 function renderTabInner(tab: { thumb?: string; icon?: React.ReactNode; label: string }) {
   if (tab.thumb) {
     return (
@@ -188,6 +222,9 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
       showSearch: false,
     });
     picker.addEventListener('emoji:select', event => {
+      // This handler fires before picmo runs its own recents addOrUpdate, so
+      // patching here fixes the dedup bug from the very first select.
+      patchPicmoRecentsDedup(picker);
       if (event.url) {
         onCustomEmojiSelect(event.label, event.url);
       } else {
