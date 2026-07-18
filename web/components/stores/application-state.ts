@@ -29,7 +29,7 @@ export function makeEmptyAppState(): AppStateOptions {
 }
 
 const OFFLINE_STATE: AppStateOptions = {
-  chatAvailable: false,
+  chatAvailable: true,
   chatLoading: false,
   videoAvailable: false,
   appLoading: false,
