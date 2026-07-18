@@ -47,3 +47,6 @@ web/style-definitions/build/
 
 web/public/sw.js
 web/public/workbox-*.js
+
+# TypeScript incremental compile cache (local only; not needed for Docker/CI)
+*.tsbuildinfo
