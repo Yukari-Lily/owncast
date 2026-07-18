@@ -175,40 +175,52 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
 
     const clip = evt.clipboardData;
     const { types } = clip;
-    const contentTypes = ['text/html', 'text/plain'];
+    const html = types.includes('text/html') ? clip.getData('text/html') : '';
+    const plain = types.includes('text/plain') ? clip.getData('text/plain') : '';
 
-    let content;
+    // Use the sanitized HTML path when there's no plain text, or when the HTML
+    // carries an image (e.g. a custom emoji copied from chat) that plain text
+    // can't represent. Otherwise prefer plain text: clipboard HTML wraps even
+    // single-line copies in block elements (<p>/<div>) plus inter-element
+    // whitespace, which the text extractor turns into spurious blank lines
+    // between every pasted line.
+    if (html && (!plain || /<img\b/i.test(html))) {
+      const sanitized = sanitizeHtml(html, {
+        allowedTags: ['b', 'i', 'em', 'strong', 'a', 'br', 'p', 'img'],
+        allowedAttributes: {
+          img: ['class', 'alt', 'title', 'src'],
+        },
+        allowedClasses: {
+          img: ['emoji'],
+        },
+        transformTags: {
+          h1: 'p',
+          h2: 'p',
+          h3: 'p',
+        },
+      });
 
-    for (let i = 0; i < contentTypes.length; i += 1) {
-      const contentType = contentTypes[i];
-
-      if (types.includes(contentType)) {
-        content = clip.getData(contentType);
-        break;
-      }
+      // MDN lists this as deprecated, but it's the only way to save this paste
+      // into the browser's Undo buffer. Plus it handles all the selection
+      // deletion, caret positioning, etc automaticaly.
+      if (sanitized) document.execCommand('insertHTML', false, sanitized);
+      return;
     }
 
-    if (!content) return;
+    if (!plain) return;
 
-    const sanitized = sanitizeHtml(content, {
-      allowedTags: ['b', 'i', 'em', 'strong', 'a', 'br', 'p', 'img'],
-      allowedAttributes: {
-        img: ['class', 'alt', 'title', 'src'],
-      },
-      allowedClasses: {
-        img: ['emoji'],
-      },
-      transformTags: {
-        h1: 'p',
-        h2: 'p',
-        h3: 'p',
-      },
-    });
-
-    // MDN lists this as deprecated, but it's the only way to save this paste
-    // into the browser's Undo buffer. Plus it handles all the selection
-    // deletion, caret positioning, etc automaticaly.
-    if (sanitized) document.execCommand('insertHTML', false, sanitized);
+    // Insert as escaped text with explicit <br> line breaks. The extractor
+    // turns <br> back into \n, so this avoids the doubled blank lines that
+    // block-level wrappers (<p>/<div>) in clipboard HTML would produce, while
+    // still rendering correctly regardless of the contentEditable's
+    // white-space setting.
+    const escaped = plain
+      .replace(/\r\n?/g, '\n') // normalize CRLF / CR to LF
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\n/g, '<br>');
+    document.execCommand('insertHTML', false, escaped);
   };
 
   const handleChange = () => {
@@ -277,6 +289,7 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
         {enabled && (
           <div style={{ display: 'flex', paddingLeft: '5px' }}>
             <Popover
+              overlayClassName="emoji-popover"
               content={
                 <EmojiPicker
                   customEmoji={customEmoji}
