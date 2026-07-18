@@ -30,6 +30,7 @@ hls/
 !test/automated/hls/
 dist/
 data/
+temp/
 transcoder.log
 owncast.log*
 chat.db
