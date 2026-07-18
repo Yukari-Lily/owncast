@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useContext, ReactElement } from 'react';
+import React, { useState, useEffect, ReactElement } from 'react';
 import { Tabs } from 'antd';
-import { ServerStatusContext } from '../../../utils/server-status-context';
 import {
   CONNECTED_CLIENTS,
   fetchData,
@@ -17,9 +16,6 @@ import { AdminLayout } from '../../../components/layouts/AdminLayout';
 export const FETCH_INTERVAL = 10 * 1000; // 10 sec
 
 export default function ChatUsers() {
-  const context = useContext(ServerStatusContext);
-  const { online } = context || {};
-
   const [disabledUsers, setDisabledUsers] = useState([]);
   const [ipBans, setIPBans] = useState([]);
   const [clients, setClients] = useState([]);
@@ -65,9 +61,9 @@ export default function ChatUsers() {
     return () => {
       clearInterval(getStatusIntervalId);
     };
-  }, [online]);
+  }, []);
 
-  const connectedUsers = online ? (
+  const connectedUsers = (
     <>
       <ClientTable data={clients} />
       <p className="description">
@@ -82,15 +78,9 @@ export default function ChatUsers() {
         to configure additional details about your viewers.
       </p>
     </>
-  ) : (
-    <p className="description">
-      When a stream is active and chat is enabled, connected chat clients will be displayed here.
-    </p>
   );
 
-  const connectedUserTabTitle = (
-    <span>Connected {online ? `(${clients.length})` : '(offline)'}</span>
-  );
+  const connectedUserTabTitle = <span>Connected ({clients.length})</span>;
 
   const bannedUsersTabTitle = <span>Banned Users ({disabledUsers.length})</span>;
   const bannedUsersTable = <UserTable data={disabledUsers} />;
