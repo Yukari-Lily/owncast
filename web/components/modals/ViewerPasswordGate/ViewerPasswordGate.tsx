@@ -69,29 +69,22 @@ export const ViewerPasswordGate: FC<ViewerPasswordGateProps> = ({ onAuthenticate
           <LockOutlined className={styles.icon} />
         </div>
         <Typography.Title level={3} className={styles.title}>
-          Password Required
+          需要密码喵
         </Typography.Title>
-        <Typography.Text className={styles.subtitle}>
-          This stream is protected. Please enter the password to continue.
-        </Typography.Text>
+        <Typography.Title level={5} className={styles.subtitle}>
+          提示：臭臭的6位数字
+        </Typography.Title>
         <div className={styles.form}>
           <Input.Password
             placeholder="Enter password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={e => setPassword(e.target.value)}
             onKeyDown={handleKeyDown}
             size="large"
             className={styles.input}
             disabled={loading}
           />
-          {error && (
-            <Alert
-              message={error}
-              type="error"
-              showIcon
-              className={styles.error}
-            />
-          )}
+          {error && <Alert message={error} type="error" showIcon className={styles.error} />}
           <Button
             type="primary"
             onClick={handleSubmit}
