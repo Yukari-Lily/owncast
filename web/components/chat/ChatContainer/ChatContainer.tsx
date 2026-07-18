@@ -1,5 +1,5 @@
 import { Virtuoso } from 'react-virtuoso';
-import { useState, useMemo, useRef, useCallback, CSSProperties, FC, useEffect } from 'react';
+import { useState, useMemo, useRef, CSSProperties, FC, useEffect } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import {
   ConnectedClientInfoEvent,
@@ -85,6 +85,7 @@ export const ChatContainer: FC<ChatContainerProps> = ({
   focusInput = true,
 }) => {
   const [showScrollToBottomButton, setShowScrollToBottomButton] = useState(false);
+  const [isAtBottom, setIsAtBottom] = useState(false);
 
   const chatContainerRef = useRef(null);
   const scrollToBottomDelay = useRef(null);
@@ -227,6 +228,8 @@ export const ChatContainer: FC<ChatContainerProps> = ({
     clearTimeout(scrollToBottomDelay.current);
     scrollToBottomDelay.current = setTimeout(() => {
       ref.current?.scrollTo({ top: Infinity, left: 0, behavior: 'auto' });
+
+      setIsAtBottom(true);
     }, 150);
     setShowScrollToBottomButton(false);
   };
@@ -240,53 +243,48 @@ export const ChatContainer: FC<ChatContainerProps> = ({
     }, 500);
   }, []);
 
-  // followOutput / atBottomStateChange are kept stable (useCallback, empty
-  // deps) so the <Virtuoso> element isn't recreated on unrelated re-renders.
-  //
-  // Return 'auto' (instant) rather than 'smooth' when at the bottom. 'smooth'
-  // can't keep up with rapid updates: the browser's smooth-scroll animation
-  // targets a position that goes stale when the next message (or a join/part
-  // event) extends the list mid-animation, or when a tall message triggers a
-  // layout shift (alignToBottom padding collapse / input resize) -- either way
-  // the viewport ends up a line short or scrolls in two stages. 'auto' jumps
-  // instantly to the latest item, and Virtuoso's pendingScrollHandle already
-  // collapses a burst into a single scroll to the last message, so bursts land
-  // on the true bottom in one motion.
-  const handleFollowOutput = useCallback((isAtBottom: boolean) => {
-    if (isAtBottom) {
-      return 'auto' as const;
-    }
-    return false;
-  }, []);
-
-  const handleAtBottomStateChange = useCallback((bottom: boolean) => {
-    setShowScrollToBottomButton(!bottom);
-  }, []);
-
   const MessagesTable = useMemo(
     () => (
-      <Virtuoso
-        id="virtuoso"
-        style={{ height }}
-        className={styles.virtuoso}
-        ref={chatContainerRef}
-        data={messages}
-        itemContent={(index, message) => getViewForMessage(index, message)}
-        initialTopMostItemIndex={messages.length - 1}
-        followOutput={handleFollowOutput}
-        alignToBottom
-        atBottomThreshold={70}
-        atBottomStateChange={handleAtBottomStateChange}
-      />
+      <>
+        <Virtuoso
+          id="virtuoso"
+          style={{ height }}
+          className={styles.virtuoso}
+          ref={chatContainerRef}
+          data={messages}
+          itemContent={(index, message) => getViewForMessage(index, message)}
+          initialTopMostItemIndex={messages.length - 1}
+          followOutput={() => {
+            if (isAtBottom) {
+              setShowScrollToBottomButton(false);
+              scrollChatToBottom(chatContainerRef);
+              return 'smooth';
+            }
+
+            return false;
+          }}
+          alignToBottom
+          atBottomThreshold={70}
+          atBottomStateChange={bottom => {
+            setIsAtBottom(bottom);
+
+            if (bottom) {
+              setShowScrollToBottomButton(false);
+            } else {
+              setShowScrollToBottomButton(true);
+            }
+          }}
+        />
+        {showScrollToBottomButton && (
+          <ScrollToBotBtn
+            onClick={() => {
+              scrollChatToBottom(chatContainerRef);
+            }}
+          />
+        )}
+      </>
     ),
-    [
-      messages,
-      usernameToHighlight,
-      chatUserId,
-      isModerator,
-      handleFollowOutput,
-      handleAtBottomStateChange,
-    ],
+    [messages, usernameToHighlight, chatUserId, isModerator, showScrollToBottomButton, isAtBottom],
   );
 
   const defaultChatWidth: number = 320;
@@ -356,13 +354,6 @@ export const ChatContainer: FC<ChatContainerProps> = ({
         style={desktop && { width: `${defaultChatWidth}px` }}
       >
         {MessagesTable}
-        {showScrollToBottomButton && (
-          <ScrollToBotBtn
-            onClick={() => {
-              scrollChatToBottom(chatContainerRef);
-            }}
-          />
-        )}
         {showInput && (
           <div className={styles.chatTextField}>
             <ChatTextField enabled={chatEnabled} focusInput={focusInput} />
