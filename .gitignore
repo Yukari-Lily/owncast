@@ -30,6 +30,7 @@ hls/
 !test/automated/hls/
 dist/
 data/
+temp/
 transcoder.log
 owncast.log*
 chat.db
@@ -46,3 +47,6 @@ web/style-definitions/build/
 
 web/public/sw.js
 web/public/workbox-*.js
+
+# TypeScript incremental compile cache (local only; not needed for Docker/CI)
+*.tsbuildinfo
