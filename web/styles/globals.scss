@@ -131,3 +131,44 @@ body {
   margin-right: 2px;
   vertical-align: middle;
 }
+
+// Remove antd's default inner padding on the emoji popover so the picker fills
+// the popover edge to edge. The scoped selector outranks antd's
+// `.ant-popover-inner-content` (higher specificity, loaded later), so no
+// `!important` is needed.
+.emoji-popover .ant-popover-inner-content {
+  padding: 0;
+}
+
+// Emoji picker: hide the per-category name header on single-category tabs
+// (per-folder tabs). The "所有" tab shows recents + all (two categories) and
+// keeps both headers so the two sections can be told apart.
+// `!important` is needed because picmo injects its own styles at runtime.
+.emoji-single-category .picmo__categoryName {
+  display: none !important;
+}
+
+// Keep the emoji area a constant height across tabs so the box doesn't jump
+// when switching ("所有" has two visible headers, single-category tabs hide
+// theirs, which would otherwise make "所有" taller). `rows + 1em` matches the
+// single-category grid plus its 0.5em top/bottom padding, with no
+// header-reserved height.
+.picmo__picker {
+  --emoji-area-height: calc(
+    (var(--row-count) * var(--emoji-size) * var(--emoji-size-multiplier)) + 1em
+  ) !important;
+}
+
+// On single-category tabs the header is hidden, so add symmetric padding around
+// the grid so all four sides match (0.5em, same as the left/right the emoji
+// container already has).
+.emoji-single-category .picmo__emojiContainer {
+  padding-top: 0.5em !important;
+  padding-bottom: 0.5em !important;
+}
+
+// Subtle hover for inactive emoji category tabs (the active tab keeps its accent
+// border). Semi-transparent gray works on both light and dark themes.
+.emoji-tab:not(.emoji-tab-active):hover {
+  background: rgba(127, 127, 127, 0.15);
+}
