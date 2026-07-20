@@ -35,13 +35,6 @@ const SERVER_STATUS_POLL_DURATION = 5000;
 const ACCESS_TOKEN_KEY = 'accessToken';
 const VIEWER_AUTH_KEY = 'viewerAuthenticated';
 
-// Maximum number of chat messages retained client-side. Incoming chat, join,
-// part and system events are appended without limit otherwise, which makes the
-// per-message O(n) work (array copy, message filtering, collapse scan, renders)
-// grow over a long-lived page and steadily raise CPU. Trimming to the most
-// recent messages keeps that work bounded.
-const MAX_STORED_CHAT_MESSAGES = 500;
-
 let serverStatusRefreshPoll: ReturnType<typeof setInterval>;
 let hasBeenModeratorNotified = false;
 let hasWebsocketDisconnected = false;
@@ -356,10 +349,7 @@ export const ClientConfigStore: FC = () => {
       if (message.id && currentState.some(m => m.id === message.id)) {
         return currentState;
       }
-      const next = [...currentState, message];
-      return next.length > MAX_STORED_CHAT_MESSAGES
-        ? next.slice(next.length - MAX_STORED_CHAT_MESSAGES)
-        : next;
+      return [...currentState, message];
     });
   };
 
