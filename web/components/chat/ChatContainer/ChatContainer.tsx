@@ -1,5 +1,5 @@
 import { Virtuoso } from 'react-virtuoso';
-import { useState, useMemo, useRef, CSSProperties, FC, useEffect } from 'react';
+import { useState, useMemo, useRef, CSSProperties, FC, useEffect, useCallback } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import {
   ConnectedClientInfoEvent,
@@ -21,6 +21,7 @@ import { ChatSocialMessage } from '../ChatSocialMessage/ChatSocialMessage';
 import { ChatNameChangeMessage } from '../ChatNameChangeMessage/ChatNameChangeMessage';
 import { User } from '../../../interfaces/user.model';
 import { ComponentError } from '../../ui/ComponentError/ComponentError';
+import { attachSmoothWheelScroll } from '../../../utils/smoothWheelScroll';
 
 export type ChatContainerProps = {
   messages: ChatMessage[];
@@ -89,6 +90,19 @@ export const ChatContainer: FC<ChatContainerProps> = ({
 
   const chatContainerRef = useRef(null);
   const scrollToBottomDelay = useRef(null);
+  // Dispose handle for ease-out wheel scrolling on Virtuoso's scroller element.
+  const detachSmoothScroll = useRef<(() => void) | null>(null);
+
+  const scrollerRef = useCallback((el: HTMLElement | Window | null) => {
+    if (detachSmoothScroll.current) {
+      detachSmoothScroll.current();
+      detachSmoothScroll.current = null;
+    }
+    // Virtuoso may hand back Window in some configs; we only smooth HTMLElements.
+    if (el && el instanceof HTMLElement) {
+      detachSmoothScroll.current = attachSmoothWheelScroll(el, 'y');
+    }
+  }, []);
 
   const collapsedIndexes: boolean[] = [];
   let consecutiveTally: number = 1;
@@ -115,9 +129,13 @@ export const ChatContainer: FC<ChatContainerProps> = ({
 
   useEffect(
     () =>
-      // Clear the timer when the component unmounts
+      // Clear the timer and wheel-scroll listener when the component unmounts
       () => {
         clearTimeout(scrollToBottomDelay.current);
+        if (detachSmoothScroll.current) {
+          detachSmoothScroll.current();
+          detachSmoothScroll.current = null;
+        }
       },
     [],
   );
@@ -226,9 +244,19 @@ export const ChatContainer: FC<ChatContainerProps> = ({
 
   const scrollChatToBottom = ref => {
     clearTimeout(scrollToBottomDelay.current);
+    // Virtuoso's scrollTo / followOutput are external to the wheel ease.
+    // smoothWheelScroll yields on those scroll events (see lastWritten check)
+    // so it no longer fights and leaves the list mid-way.
     scrollToBottomDelay.current = setTimeout(() => {
-      ref.current?.scrollTo({ top: Infinity, left: 0, behavior: 'auto' });
-
+      // Prefer scrollToIndex so Virtuoso lands on the last item even when
+      // content height is still settling after a new message.
+      const list = ref.current;
+      if (!list) return;
+      if (typeof list.scrollToIndex === 'function' && messages.length > 0) {
+        list.scrollToIndex({ index: messages.length - 1, align: 'end', behavior: 'auto' });
+      } else {
+        list.scrollTo({ top: Infinity, left: 0, behavior: 'auto' });
+      }
       setIsAtBottom(true);
     }, 150);
     setShowScrollToBottomButton(false);
@@ -251,6 +279,7 @@ export const ChatContainer: FC<ChatContainerProps> = ({
           style={{ height }}
           className={styles.virtuoso}
           ref={chatContainerRef}
+          scrollerRef={scrollerRef}
           data={messages}
           itemContent={(index, message) => getViewForMessage(index, message)}
           initialTopMostItemIndex={messages.length - 1}

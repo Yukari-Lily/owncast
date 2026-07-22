@@ -1,6 +1,7 @@
 import React, { FC, useEffect, useMemo, useRef, useState } from 'react';
 import { createPicker } from 'picmo';
 import type { Emoji } from 'emojibase';
+import { attachSmoothWheelScroll } from '../../../utils/smoothWheelScroll';
 
 export type EmojiPickerProps = {
   onEmojiSelect: (emoji: string) => void;
@@ -59,8 +60,8 @@ const AllIcon = () => (
     xmlns="http://www.w3.org/2000/svg"
     viewBox="0 0 24 24"
     fill="currentColor"
-    width="20"
-    height="20"
+    width="22"
+    height="22"
     aria-hidden="true"
   >
     <rect x="3" y="3" width="8" height="8" rx="1.5" />
@@ -136,12 +137,15 @@ function patchPicmoRecentsDedup(picker) {
   }
 }
 
+const TAB_SIZE = 36;
+
 function renderTabInner(tab: { thumb?: string; icon?: React.ReactNode; label: string }) {
   if (tab.thumb) {
     return (
       <img
         src={tab.thumb}
         alt={tab.label}
+        draggable={false}
         style={{ width: '100%', height: '100%', objectFit: 'contain' }}
       />
     );
@@ -149,7 +153,7 @@ function renderTabInner(tab: { thumb?: string; icon?: React.ReactNode; label: st
   if (tab.icon) {
     return tab.icon;
   }
-  return <span style={{ fontSize: '9px' }}>{tab.label.slice(0, 2)}</span>;
+  return <span style={{ fontSize: '10px' }}>{tab.label.slice(0, 2)}</span>;
 }
 
 export const EmojiPicker: FC<EmojiPickerProps> = ({
@@ -237,8 +241,15 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
 
     // Under the "ALL" tab, relabel the two category headers (recents / all) to
     // match the tab icons. Other tabs hide the single header via CSS.
-    if (isAll) {
-      picker.addEventListener('data:ready', () => {
+    // Also attach ease-out wheel scrolling to the emoji grid (same feel as tabs).
+    let detachEmojiScroll: (() => void) | undefined;
+    const attachEmojiAreaScroll = () => {
+      const area = root.querySelector('.picmo__emojiArea, .emojiArea') as HTMLElement | null;
+      if (!area || detachEmojiScroll) return;
+      detachEmojiScroll = attachSmoothWheelScroll(area, 'y');
+    };
+    picker.addEventListener('data:ready', () => {
+      if (isAll) {
         customizeCategoryHeader(
           root.querySelector('.picmo__categoryName[data-category="recents"]'),
           RECENTS_ICON_SVG,
@@ -249,10 +260,14 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
           ALL_ICON_SVG,
           'All',
         );
-      });
-    }
+      }
+      attachEmojiAreaScroll();
+    });
+    // data:ready may have already fired for a fast/sync init; try once now too.
+    attachEmojiAreaScroll();
 
     return () => {
+      if (detachEmojiScroll) detachEmojiScroll();
       // picmo's destroy can throw if the picker failed to fully initialize.
       try {
         picker.destroy();
@@ -276,15 +291,52 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
     return [{ key: ALL, label: 'ALL', icon: <AllIcon /> }, ...folderTabs];
   }, [folderNames, groups]);
 
+  const tabsRef = useRef<HTMLDivElement>(null);
+
+  // Horizontal ease-out wheel scroll on the tab strip (shared helper).
+  useEffect(() => {
+    const el = tabsRef.current;
+    if (!el) return undefined;
+    return attachSmoothWheelScroll(el, 'x');
+  }, []);
+
+  // Warm tab thumbnails so the strip doesn't paint empty boxes on first open.
+  useEffect(() => {
+    tabs.forEach(t => {
+      if (!t.thumb) return;
+      const img = new Image();
+      img.src = t.thumb;
+    });
+  }, [tabs]);
+
+  // Root is width:fit-content so its size is driven by the picmo child
+  // (--picker-width, which custom CSS may enlarge). The tab strip uses the
+  // width:0 + min-width:100% trick so it fills that width and scrolls instead
+  // of contributing its long content width to the parent (which previously
+  // stretched the popover across the whole chat).
   return (
-    <div style={{ display: 'flex', flexDirection: 'column' }}>
+    <div
+      className="emoji-picker-root"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        width: 'fit-content',
+        maxWidth: 'calc(100vw - 1.5rem)',
+      }}
+    >
       <div
+        ref={tabsRef}
         className="emoji-tabs"
         style={{
           display: 'flex',
-          gap: '4px',
+          gap: '6px',
           overflowX: 'auto',
-          padding: '0.5em',
+          padding: '0.55em 0.6em',
+          // Do not contribute intrinsic width; fill the picmo-sized parent.
+          width: 0,
+          minWidth: '100%',
+          boxSizing: 'border-box',
+          flexShrink: 0,
         }}
       >
         {tabs.map(t => {
@@ -298,14 +350,14 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
               className={`emoji-tab${active ? ' emoji-tab-active' : ''}`}
               style={{
                 flex: '0 0 auto',
-                width: '28px',
-                height: '28px',
-                padding: '0',
+                width: TAB_SIZE,
+                height: TAB_SIZE,
+                padding: '2px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 border: `2px solid ${active ? 'var(--accent-color, #4f46e5)' : 'transparent'}`,
-                borderRadius: '5px',
+                borderRadius: '7px',
                 background: 'transparent',
                 cursor: 'pointer',
                 overflow: 'hidden',

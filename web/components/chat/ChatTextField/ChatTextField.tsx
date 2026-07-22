@@ -14,7 +14,11 @@ import styles from './ChatTextField.module.scss';
 
 // Lazy loaded components
 
-const EmojiPicker = dynamic(() => import('./EmojiPicker').then(mod => mod.EmojiPicker), {
+// Keep the import function so we can also prefetch the chunk on idle / hover
+// and avoid the cold-start delay the first time the user opens the picker.
+const loadEmojiPicker = () => import('./EmojiPicker').then(mod => mod.EmojiPicker);
+
+const EmojiPicker = dynamic(loadEmojiPicker, {
   ssr: false,
 });
 
@@ -124,6 +128,30 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
   const websocketService = useRecoilValue<WebsocketService>(websocketServiceAtom);
   const [contentEditable, setContentEditable] = useState(null);
   const [customEmoji, setCustomEmoji] = useState([]);
+
+  // Prefetch the EmojiPicker chunk after idle so first open is not a cold load.
+  // Hover on the smile button also kicks it off as a backup for fast openers.
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let cancelled = false;
+    const prefetch = () => {
+      if (!cancelled) loadEmojiPicker();
+    };
+    let idleId: number | undefined;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      idleId = window.requestIdleCallback(prefetch, { timeout: 2500 });
+    } else {
+      timeoutId = setTimeout(prefetch, 1200);
+    }
+    return () => {
+      cancelled = true;
+      if (idleId !== undefined && 'cancelIdleCallback' in window) {
+        window.cancelIdleCallback(idleId);
+      }
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    };
+  }, [enabled]);
 
   const onRootRef = el => {
     setContentEditable(el);
@@ -305,6 +333,9 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
                 aria-label="Emoji picker"
                 className={styles.emojiButton}
                 title="Emoji picker button"
+                onMouseEnter={loadEmojiPicker}
+                onFocus={loadEmojiPicker}
+                onTouchStart={loadEmojiPicker}
               >
                 <SmileOutlined />
               </button>

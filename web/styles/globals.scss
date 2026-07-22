@@ -136,8 +136,23 @@ body {
 // the popover edge to edge. The scoped selector outranks antd's
 // `.ant-popover-inner-content` (higher specificity, loaded later), so no
 // `!important` is needed.
+// Width comes from .emoji-picker-root (fit-content around picmo's natural
+// --picker-width). Only cap at the viewport so custom-enlarged pickers still
+// fit on narrow screens; overflow:hidden keeps the long tab strip from
+// spilling out of the popover.
 .emoji-popover .ant-popover-inner-content {
   padding: 0;
+  max-width: calc(100vw - 1.5rem);
+  overflow: hidden;
+}
+
+// Root width is fit-content (picmo's --picker-width). overflow:hidden keeps a
+// long tab strip from visually spilling; the strip itself scrolls via
+// width:0 + min-width:100% (see EmojiPicker inline styles).
+.emoji-picker-root {
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 // Emoji picker: hide the per-category name header on single-category tabs
@@ -169,6 +184,57 @@ body {
 
 // Subtle hover for inactive emoji category tabs (the active tab keeps its accent
 // border). Semi-transparent gray works on both light and dark themes.
+.emoji-tab {
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
+}
 .emoji-tab:not(.emoji-tab-active):hover {
   background: rgba(127, 127, 127, 0.15);
+  transform: scale(1.06);
+}
+.emoji-tab-active {
+  background: rgba(127, 127, 127, 0.1);
+}
+
+// Hide scrollbars on the emoji tab strip and the picmo emoji grid so the
+// picker looks cleaner. Scrolling still works (wheel / trackpad / touch);
+// both axes use ease-out wheel inertia via attachSmoothWheelScroll.
+.emoji-tabs,
+.emoji-popover .picmo__emojiArea,
+.emoji-popover .emojiArea {
+  scrollbar-width: none; // Firefox
+  -ms-overflow-style: none; // legacy Edge
+  -webkit-overflow-scrolling: touch;
+  &::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+}
+
+.emoji-popover .picmo__emojiArea,
+.emoji-popover .emojiArea {
+  overscroll-behavior-y: contain;
+}
+
+// Soft edge fade when the tab strip overflows, so hidden tabs feel less abrupt.
+// width/min-width for the scroll trick live on the element (EmojiPicker.tsx);
+// here only visual extras. Wheel scrolling uses JS ease-out in EmojiPicker
+// (do not set scroll-behavior:smooth here — it would fight that animation).
+.emoji-tabs {
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    #000 16px,
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    #000 16px,
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
 }
