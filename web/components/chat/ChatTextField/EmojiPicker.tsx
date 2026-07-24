@@ -1,4 +1,12 @@
-import React, { FC, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  FC,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { createPicker } from 'picmo';
 import type { Emoji } from 'emojibase';
 import { attachSmoothWheelScroll } from '../../../utils/smoothWheelScroll';
@@ -7,13 +15,29 @@ export type EmojiPickerProps = {
   onEmojiSelect: (emoji: string) => void;
   onCustomEmojiSelect: (name: string, url: string) => void;
   customEmoji: any[];
+  /** When false, hide picmo hosts (cache kept) so the close animation stays smooth. */
+  open?: boolean;
 };
 
 type EmojiRef = { name: string; url: string };
 
+type PickerEntry = {
+  host: HTMLDivElement;
+  // picmo's createPicker return type is not exported cleanly; keep loose.
+  picker: {
+    destroy: () => void;
+    addEventListener: (type: string, fn: (...args: any[]) => void) => void;
+  };
+  detachScroll?: () => void;
+  /** Clears the data:ready fallback timer so a closed host never reveals. */
+  cancelReveal?: () => void;
+};
+
 const MAX_RECENTS = 10;
 const ALL = '__all__';
 const EMPTY: EmojiRef[] = [];
+// Idle-prewarm at most this many non-ALL folders beyond the active tab.
+const IDLE_PREWARM_LIMIT = 2;
 
 // picmo hashes the emoji dataset with crypto.subtle.digest to detect changes.
 // crypto.subtle is only exposed in secure contexts (HTTPS / localhost), so on
@@ -25,7 +49,7 @@ function ensureCryptoSubtleAvailable() {
   if (typeof crypto !== 'undefined' && crypto.subtle) {
     return;
   }
-  // FNV-1a 32-bit, spread across 32 bytes to mimic a SHA-256 digest length.
+  // FNV-1a 32-bit, padded across 32 bytes to mimic a SHA-256 digest length.
   // picmo only uses this for emoji-data change detection, never for security.
   /* eslint-disable no-bitwise */
   const digest = async (_algorithm: string, data): Promise<ArrayBuffer> => {
@@ -52,6 +76,18 @@ function ensureCryptoSubtleAvailable() {
 function folderOf(url: string): string {
   const m = String(url).match(/\/img\/emoji\/([^/]+)/);
   return m ? m[1] : '其他';
+}
+
+// Tab thumbnail: prefer a file whose basename ends with _cover (e.g.
+// dy01_05_cover.png). Falls back to the first emoji in the folder.
+function tabThumbUrl(emojis: EmojiRef[] | undefined): string | undefined {
+  if (!emojis?.length) return undefined;
+  const cover = emojis.find(e => {
+    const m = String(e.url).match(/\/([^/]+)\.[^./]+$/);
+    if (!m) return false;
+    return m[1].endsWith('_cover');
+  });
+  return (cover || emojis[0]).url;
 }
 
 // A 2x2 grid icon for the "all" tab (browse the full emoji grid).
@@ -156,13 +192,56 @@ function renderTabInner(tab: { thumb?: string; icon?: React.ReactNode; label: st
   return <span style={{ fontSize: '10px' }}>{tab.label.slice(0, 2)}</span>;
 }
 
+function destroyEntry(entry: PickerEntry) {
+  if (entry.cancelReveal) {
+    try {
+      entry.cancelReveal();
+    } catch {
+      /* ignore */
+    }
+  }
+  if (entry.detachScroll) {
+    try {
+      entry.detachScroll();
+    } catch {
+      /* ignore */
+    }
+  }
+  try {
+    entry.picker.destroy();
+  } catch (e) {
+    console.warn('Failed to destroy emoji picker', e);
+  }
+  entry.host.remove();
+}
+
 export const EmojiPicker: FC<EmojiPickerProps> = ({
   onEmojiSelect,
   onCustomEmojiSelect,
   customEmoji,
+  open = true,
 }) => {
-  const ref = useRef<HTMLDivElement>();
+  // Stable mount point that holds one host div per tab (hidden until shown).
+  const hostsRootRef = useRef<HTMLDivElement>(null);
+  // Live picmo instances keyed by tab (ALL or folder name). Switching tabs
+  // only toggles host visibility; createPicker runs at most once per key until
+  // data changes, the component unmounts, or a folder select invalidates ALL
+  // (stale recents). Closing the popover only hides hosts — cache stays warm
+  // so reopen is instant.
+  const cacheRef = useRef<Map<string, PickerEntry>>(new Map());
+  // Latest callbacks / data so create handlers do not stale-close over props.
+  const onEmojiSelectRef = useRef(onEmojiSelect);
+  const onCustomEmojiSelectRef = useRef(onCustomEmojiSelect);
+  const customEmojiRef = useRef(customEmoji);
+  onEmojiSelectRef.current = onEmojiSelect;
+  onCustomEmojiSelectRef.current = onCustomEmojiSelect;
+  customEmojiRef.current = customEmoji;
+
   const [activeGroup, setActiveGroup] = useState<string>(ALL);
+  const activeGroupRef = useRef(activeGroup);
+  activeGroupRef.current = activeGroup;
+  const openRef = useRef(open);
+  openRef.current = open;
 
   // Group custom emoji by their emoji folder (derived from the URL path).
   // A Map preserves insertion order, which matches the server's WalkDir order
@@ -181,112 +260,299 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
     return map;
   }, [customEmoji]);
 
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
+
   const folderNames = useMemo(() => Array.from(groups.keys()), [groups]);
 
-  // The custom emojis to hand to picmo for the active tab. Returns stable
-  // references so the picker only recreates when the tab or the data actually
-  // changes -- not on every emoji select.
-  const activeEmojis = useMemo<EmojiRef[]>(() => {
-    if (activeGroup === ALL) return customEmoji as EmojiRef[];
-    return groups.get(activeGroup) || EMPTY;
-  }, [activeGroup, customEmoji, groups]);
+  const emojisFor = useCallback((key: string): EmojiRef[] => {
+    if (key === ALL) return (customEmojiRef.current as EmojiRef[]) || EMPTY;
+    return groupsRef.current.get(key) || EMPTY;
+  }, []);
 
-  // picmo is configured per tab:
-  //  - "ALL": show recents (top) + all custom, default scrolled to custom so
-  //    scrolling up reveals the recents. recents only live here, not in folders.
-  //  - folder: show only that folder's custom emojis (no recents).
-  // The picker is recreated when the tab or the visible set changes. recents
-  // are managed by picmo itself (maxRecents, persisted in localStorage).
-  useEffect(() => {
-    ensureCryptoSubtleAvailable();
+  // Build (or return cached) picmo picker for a tab key. Host stays hidden;
+  // caller is responsible for showing the active one. Allowed while the
+  // popover is closed so idle prewarm can finish before the next open.
+  const ensurePicker = useCallback(
+    (key: string): PickerEntry | null => {
+      // Never build against an empty list (initial [] before /api/emoji returns).
+      if (!customEmojiRef.current?.length) return null;
 
-    const root = ref.current;
-    root.innerHTML = '';
+      const existing = cacheRef.current.get(key);
+      if (existing) return existing;
 
-    const custom = activeEmojis.map(e => ({
-      emoji: e.name,
-      label: e.name,
-      url: e.url,
-      // picmo dedupes recents by `hexcode`; custom emojis have none, so without
-      // this every select wipes the recents (all undefined === undefined). Use
-      // the URL as a stable unique key.
-      hexcode: e.url,
-    }));
+      const root = hostsRootRef.current;
+      if (!root) return null;
 
-    const isAll = activeGroup === ALL;
+      ensureCryptoSubtleAvailable();
 
-    const picker = createPicker({
-      rootElement: root,
-      custom,
-      initialCategory: 'custom',
-      categories: isAll ? ['recents', 'custom'] : ['custom'],
-      maxRecents: MAX_RECENTS,
-      emojiData: [] as Emoji[],
-      messages: { groups: [], skinTones: [], subgroups: [] },
-      showPreview: false,
-      showRecents: isAll,
-      showCategoryTabs: false,
-      showSearch: false,
-    });
-    picker.addEventListener('emoji:select', event => {
-      // This handler fires before picmo runs its own recents addOrUpdate, so
-      // patching here fixes the dedup bug from the very first select.
-      patchPicmoRecentsDedup(picker);
-      if (event.url) {
-        onCustomEmojiSelect(event.label, event.url);
+      const host = document.createElement('div');
+      // Start hidden so prewarm / background creates do not flash content.
+      host.hidden = true;
+      // Fade in after data:ready so the first paint is not an empty box.
+      host.style.opacity = '0';
+      host.style.transition = 'opacity 80ms ease-out';
+      host.dataset.emojiTab = key;
+      if (key !== ALL) {
+        host.classList.add('emoji-single-category');
+      }
+      root.appendChild(host);
+
+      const list = emojisFor(key);
+      const custom = list.map(e => ({
+        emoji: e.name,
+        label: e.name,
+        url: e.url,
+        // picmo dedupes recents by `hexcode`; custom emojis have none, so without
+        // this every select wipes the recents (all undefined === undefined). Use
+        // the URL as a stable unique key.
+        hexcode: e.url,
+      }));
+
+      const isAll = key === ALL;
+      const picker = createPicker({
+        rootElement: host,
+        custom,
+        initialCategory: 'custom',
+        categories: isAll ? ['recents', 'custom'] : ['custom'],
+        maxRecents: MAX_RECENTS,
+        emojiData: [] as Emoji[],
+        messages: { groups: [], skinTones: [], subgroups: [] },
+        showPreview: false,
+        showRecents: isAll,
+        showCategoryTabs: false,
+        showSearch: false,
+      });
+
+      const entry: PickerEntry = { host, picker };
+
+      picker.addEventListener('emoji:select', event => {
+        // This handler fires before picmo runs its own recents addOrUpdate, so
+        // patching here fixes the dedup bug from the very first select.
+        patchPicmoRecentsDedup(picker);
+        if (event.url) {
+          onCustomEmojiSelectRef.current(event.label, event.url);
+        } else {
+          onEmojiSelectRef.current(event.emoji);
+        }
+        // Recents live only on the ALL picker. A select from a folder tab updates
+        // shared storage but not a already-mounted ALL instance — drop it so the
+        // next visit to ALL rebuilds with fresh recents. Rebuild on idle so the
+        // next open / tab switch is warm again.
+        if (key !== ALL) {
+          const allEntry = cacheRef.current.get(ALL);
+          if (allEntry) {
+            destroyEntry(allEntry);
+            cacheRef.current.delete(ALL);
+          }
+          const rebuildAll = () => {
+            if (!customEmojiRef.current?.length) return;
+            ensurePicker(ALL);
+          };
+          // Match other idle schedules in this file: bare setTimeout in the
+          // fallback. After `'requestIdleCallback' in window` is false, TS can
+          // narrow window oddly so window.setTimeout fails typecheck.
+          if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+            window.requestIdleCallback(rebuildAll, { timeout: 2000 });
+          } else {
+            setTimeout(rebuildAll, 100);
+          }
+        }
+      });
+
+      const attachEmojiAreaScroll = () => {
+        const area = host.querySelector('.picmo__emojiArea, .emojiArea') as HTMLElement | null;
+        if (!area || entry.detachScroll) return;
+        entry.detachScroll = attachSmoothWheelScroll(area, 'y');
+      };
+
+      let revealed = false;
+      const reveal = () => {
+        if (revealed) return;
+        revealed = true;
+        if (entry.cancelReveal) {
+          entry.cancelReveal();
+          entry.cancelReveal = undefined;
+        }
+        host.style.opacity = '1';
+        attachEmojiAreaScroll();
+      };
+
+      picker.addEventListener('data:ready', () => {
+        if (isAll) {
+          customizeCategoryHeader(
+            host.querySelector('.picmo__categoryName[data-category="recents"]'),
+            RECENTS_ICON_SVG,
+            'Recent',
+          );
+          customizeCategoryHeader(
+            host.querySelector('.picmo__categoryName[data-category="custom"]'),
+            ALL_ICON_SVG,
+            'All',
+          );
+        }
+        reveal();
+      });
+      // data:ready may have already fired for a fast/sync init; try once now too.
+      if (
+        host.querySelector('.picmo__emojiArea, .emojiArea, .picmo__picker:not(.picmo__skeleton)')
+      ) {
+        reveal();
       } else {
-        onEmojiSelect(event.emoji);
+        // Fallback: if data:ready never fires, do not leave the host invisible.
+        const tid = window.setTimeout(reveal, 400);
+        entry.cancelReveal = () => window.clearTimeout(tid);
       }
-    });
 
-    // Under the "ALL" tab, relabel the two category headers (recents / all) to
-    // match the tab icons. Other tabs hide the single header via CSS.
-    // Also attach ease-out wheel scrolling to the emoji grid (same feel as tabs).
-    let detachEmojiScroll: (() => void) | undefined;
-    const attachEmojiAreaScroll = () => {
-      const area = root.querySelector('.picmo__emojiArea, .emojiArea') as HTMLElement | null;
-      if (!area || detachEmojiScroll) return;
-      detachEmojiScroll = attachSmoothWheelScroll(area, 'y');
+      cacheRef.current.set(key, entry);
+      return entry;
+    },
+    [emojisFor],
+  );
+
+  const showTab = useCallback(
+    (key: string) => {
+      if (!openRef.current) return;
+      const entry = ensurePicker(key);
+      cacheRef.current.forEach((e, k) => {
+        e.host.hidden = k !== key;
+      });
+      if (entry) {
+        entry.host.hidden = false;
+        // Cached hosts that already finished data:ready stay at opacity 1. Fresh
+        // creates keep opacity 0 until their own reveal() so we still fade in.
+        if (
+          entry.host.querySelector(
+            '.picmo__emojiArea, .emojiArea, .picmo__picker:not(.picmo__skeleton)',
+          )
+        ) {
+          entry.host.style.opacity = '1';
+        }
+      }
+    },
+    [ensurePicker],
+  );
+
+  // Open / close: hide hosts only — keep the per-tab cache warm so reopen is
+  // instant. Freeze the shell's pixel size on close so the tab strip
+  // (width:0; min-width:100%) does not collapse mid-hide animation.
+  // Showing the active tab is handled by the activeGroup effect below (also
+  // re-runs when open flips true).
+  useLayoutEffect(() => {
+    const hostsRoot = hostsRootRef.current;
+    const shell = hostsRoot?.parentElement as HTMLElement | null;
+    if (open) {
+      if (hostsRoot) hostsRoot.style.display = '';
+      // Clear close-time size freeze so fit-content tracks picmo again.
+      if (shell) {
+        shell.style.width = '';
+        shell.style.height = '';
+        shell.style.minWidth = '';
+        shell.style.minHeight = '';
+      }
+      return;
+    }
+    // Capture full open size before hiding hosts (they drive fit-content).
+    if (shell) {
+      const box = shell.getBoundingClientRect();
+      if (box.width > 0 && box.height > 0) {
+        shell.style.width = `${Math.ceil(box.width)}px`;
+        shell.style.height = `${Math.ceil(box.height)}px`;
+        shell.style.minWidth = shell.style.width;
+        shell.style.minHeight = shell.style.height;
+      }
+    }
+    if (hostsRoot) hostsRoot.style.display = 'none';
+    // Keep cache + hosts mounted. Pending reveal timers are fine: opacity 1
+    // while hidden is harmless and avoids stuck opacity-0 after cancel.
+  }, [open]);
+
+  // Tab switch / reopen: pure show/hide of cached hosts (or create on demand).
+  useLayoutEffect(() => {
+    if (!open) return;
+    showTab(activeGroup);
+  }, [activeGroup, open, showTab]);
+
+  // When the server emoji list changes, drop every cached picker so we do not
+  // keep stale custom sets. Pure tab switches never hit this path.
+  const prevCustomEmojiRef = useRef(customEmoji);
+  useEffect(() => {
+    if (prevCustomEmojiRef.current === customEmoji) return;
+    prevCustomEmojiRef.current = customEmoji;
+    cacheRef.current.forEach(destroyEntry);
+    cacheRef.current.clear();
+    if (!customEmoji?.length) return;
+    if (openRef.current) {
+      showTab(activeGroupRef.current);
+    } else {
+      // Rebuild ALL in the background so the next open is still warm.
+      ensurePicker(ALL);
+    }
+  }, [customEmoji, showTab, ensurePicker]);
+
+  // Destroy all cached pickers when the component unmounts.
+  useEffect(
+    () => () => {
+      cacheRef.current.forEach(destroyEntry);
+      cacheRef.current.clear();
+    },
+    [],
+  );
+
+  // Once emoji data is ready, idle-prewarm the default ALL tab (and a couple of
+  // nearby folders). Safe while closed — ensurePicker no longer requires open.
+  useEffect(() => {
+    if (!customEmoji?.length || typeof window === 'undefined') return undefined;
+    let cancelled = false;
+    const run = () => {
+      if (cancelled) return;
+      ensurePicker(ALL);
+      if (cancelled) return;
+      const keys = folderNames.filter(k => !cacheRef.current.has(k));
+      const activeIdx = folderNames.indexOf(
+        activeGroupRef.current === ALL ? folderNames[0] : activeGroupRef.current,
+      );
+      const ordered = keys.slice().sort((a, b) => {
+        const da = Math.abs(folderNames.indexOf(a) - activeIdx);
+        const db = Math.abs(folderNames.indexOf(b) - activeIdx);
+        return da - db;
+      });
+      ordered.slice(0, IDLE_PREWARM_LIMIT).forEach(k => {
+        if (!cancelled) {
+          emojisFor(k).forEach(e => {
+            if (!e.url) return;
+            const img = new Image();
+            img.src = e.url;
+          });
+          ensurePicker(k);
+        }
+      });
     };
-    picker.addEventListener('data:ready', () => {
-      if (isAll) {
-        customizeCategoryHeader(
-          root.querySelector('.picmo__categoryName[data-category="recents"]'),
-          RECENTS_ICON_SVG,
-          'Recent',
-        );
-        customizeCategoryHeader(
-          root.querySelector('.picmo__categoryName[data-category="custom"]'),
-          ALL_ICON_SVG,
-          'All',
-        );
-      }
-      attachEmojiAreaScroll();
-    });
-    // data:ready may have already fired for a fast/sync init; try once now too.
-    attachEmojiAreaScroll();
-
+    let idleId: number | undefined;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    if ('requestIdleCallback' in window) {
+      idleId = window.requestIdleCallback(run, { timeout: 2500 });
+    } else {
+      timeoutId = setTimeout(run, 400);
+    }
     return () => {
-      if (detachEmojiScroll) detachEmojiScroll();
-      // picmo's destroy can throw if the picker failed to fully initialize.
-      try {
-        picker.destroy();
-      } catch (e) {
-        console.warn('Failed to destroy emoji picker', e);
+      cancelled = true;
+      if (idleId !== undefined && 'cancelIdleCallback' in window) {
+        window.cancelIdleCallback(idleId);
       }
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
     };
-    // Recreate only when the tab or the visible emoji set changes.
-  }, [activeEmojis, activeGroup]);
+  }, [customEmoji, folderNames, ensurePicker, emojisFor]);
 
-  // Tab list: [ALL] [<folder>...]. "ALL" uses a grid icon, and each folder
-  // tab uses its first emoji as a thumbnail.
+  // Tab list: [ALL] [<folder>...]. "ALL" uses a grid icon; each folder tab
+  // uses *_cover* if present, otherwise the first emoji in that folder.
   const tabs = useMemo<
     Array<{ key: string; label: string; thumb?: string; icon?: React.ReactNode }>
   >(() => {
     const folderTabs = folderNames.map(f => ({
       key: f,
       label: f,
-      thumb: groups.get(f)?.[0]?.url,
+      thumb: tabThumbUrl(groups.get(f)),
     }));
     return [{ key: ALL, label: 'ALL', icon: <AllIcon /> }, ...folderTabs];
   }, [folderNames, groups]);
@@ -308,6 +574,57 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
       img.src = t.thumb;
     });
   }, [tabs]);
+
+  // Prefetch a tab's picmo instance + image URLs on hover/focus so the click
+  // is usually a pure show. Works while open or closed (cache survives close).
+  const prewarmTab = useCallback(
+    (key: string) => {
+      if (cacheRef.current.has(key)) return;
+      // Warm images first so they are in HTTP cache when picmo mounts them.
+      emojisFor(key).forEach(e => {
+        if (!e.url) return;
+        const img = new Image();
+        img.src = e.url;
+      });
+      ensurePicker(key);
+    },
+    [emojisFor, ensurePicker],
+  );
+
+  // While open, idle-prewarm a couple of nearby folders as the user moves around
+  // the tab strip (mount-time prewarm already covers ALL + initial neighbors).
+  useEffect(() => {
+    if (!open || typeof window === 'undefined') return undefined;
+    let cancelled = false;
+    const run = () => {
+      if (cancelled) return;
+      const keys = folderNames.filter(k => k !== activeGroup && !cacheRef.current.has(k));
+      // Prefer neighbors of the active folder in tab order.
+      const activeIdx = folderNames.indexOf(activeGroup === ALL ? folderNames[0] : activeGroup);
+      const ordered = keys.slice().sort((a, b) => {
+        const da = Math.abs(folderNames.indexOf(a) - activeIdx);
+        const db = Math.abs(folderNames.indexOf(b) - activeIdx);
+        return da - db;
+      });
+      ordered.slice(0, IDLE_PREWARM_LIMIT).forEach(k => {
+        if (!cancelled) prewarmTab(k);
+      });
+    };
+    let idleId: number | undefined;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    if ('requestIdleCallback' in window) {
+      idleId = window.requestIdleCallback(run, { timeout: 3000 });
+    } else {
+      timeoutId = setTimeout(run, 800);
+    }
+    return () => {
+      cancelled = true;
+      if (idleId !== undefined && 'cancelIdleCallback' in window) {
+        window.cancelIdleCallback(idleId);
+      }
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    };
+  }, [open, activeGroup, folderNames, prewarmTab]);
 
   // Root is width:fit-content so its size is driven by the picmo child
   // (--picker-width, which custom CSS may enlarge). The tab strip uses the
@@ -346,6 +663,9 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
               key={t.key}
               type="button"
               onClick={() => setActiveGroup(t.key)}
+              onMouseEnter={() => prewarmTab(t.key)}
+              onFocus={() => prewarmTab(t.key)}
+              onTouchStart={() => prewarmTab(t.key)}
               title={t.label}
               className={`emoji-tab${active ? ' emoji-tab-active' : ''}`}
               style={{
@@ -368,7 +688,8 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
           );
         })}
       </div>
-      <div ref={ref} className={activeGroup === ALL ? undefined : 'emoji-single-category'} />
+      {/* Hosts for cached picmo instances (one child host per visited tab). */}
+      <div ref={hostsRootRef} className="emoji-picker-hosts" />
     </div>
   );
 };

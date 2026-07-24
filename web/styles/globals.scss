@@ -155,6 +155,13 @@ body {
   box-sizing: border-box;
 }
 
+// picmo always paints a shimmer skeleton on createPicker before data:ready.
+// We cache pickers per tab so recreate is rare, but first create still hits
+// this path — hide the pulse so tab switches / first paint do not flash gray.
+.emoji-popover .picmo__skeleton {
+  visibility: hidden;
+}
+
 // Emoji picker: hide the per-category name header on single-category tabs
 // (per-folder tabs). The "所有" tab shows recents + all (two categories) and
 // keeps both headers so the two sections can be told apart.

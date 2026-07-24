@@ -128,6 +128,9 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
   const websocketService = useRecoilValue<WebsocketService>(websocketServiceAtom);
   const [contentEditable, setContentEditable] = useState(null);
   const [customEmoji, setCustomEmoji] = useState([]);
+  // Track popover open so EmojiPicker can hide hosts on close (cache stays warm)
+  // and freeze shell size so the hide animation does not reflow.
+  const [emojiOpen, setEmojiOpen] = useState(false);
 
   // Prefetch the EmojiPicker chunk after idle so first open is not a cold load.
   // Hover on the smile button also kicks it off as a backup for fast openers.
@@ -318,8 +321,14 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
           <div style={{ display: 'flex', paddingLeft: '5px' }}>
             <Popover
               overlayClassName="emoji-popover"
+              // Keep the React shell mounted so EmojiPicker can retain warm picmo
+              // hosts across open/close (hide-only on close).
+              destroyTooltipOnHide={false}
+              open={emojiOpen}
+              onOpenChange={setEmojiOpen}
               content={
                 <EmojiPicker
+                  open={emojiOpen}
                   customEmoji={customEmoji}
                   onEmojiSelect={onEmojiSelect}
                   onCustomEmojiSelect={onCustomEmojiSelect}

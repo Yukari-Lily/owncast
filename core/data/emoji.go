@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -61,6 +62,9 @@ func UpdateEmojiList(force bool) (time.Time, error) {
 				emojiPath := filepath.Join(config.EmojiDir, path)
 				fileName := d.Name()
 				fileBase := fileName[:len(fileName)-len(filepath.Ext(fileName))]
+				// Optional tab thumbnail marker: foo_cover.png is still the
+				// shortcode :foo: (picker uses *_cover* URL as the tab icon).
+				fileBase = strings.TrimSuffix(fileBase, "_cover")
 				singleEmoji := models.CustomEmoji{Name: fileBase, URL: emojiPath}
 				emojiCacheData = append(emojiCacheData, singleEmoji)
 				return nil
