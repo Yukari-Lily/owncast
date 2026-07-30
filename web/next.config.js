@@ -8,9 +8,20 @@ const runtimeCaching = require('next-pwa/cache');
 const withPWA = require('next-pwa')({
   dest: 'public',
   runtimeCaching: [
-    ...runtimeCaching,
+    // NetworkOnly exclusions MUST precede `...runtimeCaching`: workbox uses
+    // the first matching route, and next-pwa's defaults end with a same-origin
+    // catch-all ("others", NetworkFirst) that would otherwise intercept and
+    // cache these URLs. The HLS playlist/segments and the live thumbnail are
+    // polled continuously (with cachebust query strings) while a stream is
+    // live; caching every cachebusted URL bloats CacheStorage and steadily
+    // burns CPU in the browser/storage process. Match on `pathname` so the
+    // cachebust query string does not defeat the rule.
     {
-      urlPattern: /\.(?:ts|m3u8)$/i,
+      urlPattern: ({ url }) => /\.(?:ts|m3u8)$/i.test(url.pathname),
+      handler: 'NetworkOnly',
+    },
+    {
+      urlPattern: ({ url }) => url.pathname === '/thumbnail.jpg',
       handler: 'NetworkOnly',
     },
     {
@@ -21,6 +32,7 @@ const withPWA = require('next-pwa')({
       urlPattern: /^\/api\/.*$/,
       handler: 'NetworkOnly',
     },
+    ...runtimeCaching,
   ],
   register: true,
   skipWaiting: true,
