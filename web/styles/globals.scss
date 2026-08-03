@@ -9,27 +9,18 @@
 :root {
   --content-padding: 0.95rem;
   --module-spacing: 12px; // margin size between lines of stuff, if needed
-  --header-height: 70px; // needed for making main content scrollable;
+  --header-height: 50px; // needed for making main content scrollable;
   --content-height: calc(100vh - var(--header-height));
   --replacement-bar-height: 46px; // needed for making main content scrollable on mobile;
 
   // chat modules
-  --chat-message-text-size: 0.825rem;
+  --chat-message-text-size: 1.15rem;
   --chat-notification-icon-padding: 6px;
   --chat-message-padding: 10px;
   --chat-text-highlight-border-radius: 3px;
-	--player-container-height: 75vh;
+	--player-container-height: 90vh;
 	--status-bar-height: 2rem;
 	--footer-padding-x: 1rem;
-
-  @include screen(tablet) {
-    --header-height: 3.85rem;
-		--player-container-height: 400px;
-  }
-
-	@include screen(mobile) {
-		--player-container-height: 250px;
-	}
 }
 
 ::selection {
@@ -125,7 +116,7 @@ body {
 
 .emoji {
   font-size: 30px;
-  height: 30px;
+  height: 100px;
   line-height: 30px;
   margin-left: 2px;
   margin-right: 2px;
@@ -179,6 +170,28 @@ body {
   --emoji-area-height: calc(
     (var(--row-count) * var(--emoji-size) * var(--emoji-size-multiplier)) + 1em
   ) !important;
+}
+
+// Baked-in emoji picker theme: big emojis.
+// picmo's search box, category tabs, and extra categories are already
+// disabled in EmojiPicker.tsx (showSearch/showCategoryTabs/categories), so
+// no CSS is needed to hide them.
+// Big 5rem emojis, 5 columns, 4 visible rows by default.
+.picmo__picker {
+  --emojis-per-row: 5 !important;
+  --row-count: 4 !important;
+}
+.picmo__picker.picmo__picker {
+  --emoji-size: 5rem !important;
+  --emoji-size-multiplier: 1.25 !important;
+}
+// On narrow views the big 5rem emojis make 5 columns (~544px) overflow the
+// viewport and clip. Drop to 3 columns (~322px) so the picker fits.
+// Higher specificity than the 5-col rule above so this wins on narrow views.
+@include screen(tablet) {
+  .emoji-popover .picmo__picker {
+    --emojis-per-row: 3 !important;
+  }
 }
 
 // On single-category tabs the header is hidden, so add symmetric padding around
@@ -244,4 +257,79 @@ body {
     #000 calc(100% - 16px),
     transparent 100%
   );
+}
+
+// ===========================================================================
+// Baked-in customizations (formerly injected as Owncast custom CSS).
+// Attribute selectors target CSS-module hashed class names so they survive
+// rebuilds; !important is required because these load before the component
+// CSS modules and must still win the cascade.
+// ===========================================================================
+
+// Hide the public site footer (scoped by id so the admin's antd
+// Layout.Footer, which shares this stylesheet, is unaffected).
+#footer {
+  visibility: hidden !important;
+}
+
+// Hide the offline banner's "last live" date.
+div[class*='OfflineBanner_lastLiveDate'] {
+  visibility: hidden !important;
+}
+
+// Horizontal padding on chat message rows.
+[class^='ChatContainer_virtuoso'] > div > div,
+[class*=' ChatContainer_virtuoso'] > div > div {
+  padding-left: 0.75em !important;
+  padding-right: 0.75em !important;
+}
+
+// Show each message's username inline, followed by ": ", then the text.
+[class^='ChatUserMessage_user'],
+[class*=' ChatUserMessage_user'],
+[class^='ChatUserMessage_repeat'],
+[class*=' ChatUserMessage_repeat'] {
+  display: inline-block !important;
+  margin-right: 3px;
+}
+[class^='ChatUserMessage_user_']::after,
+[class*=' ChatUserMessage_user_']::after,
+[class^='ChatUserMessage_repeat']::after,
+[class*=' ChatUserMessage_repeat']::after {
+  content: ': ';
+  font-weight: normal;
+}
+[class^='ChatUserMessage_message'] p,
+[class*=' ChatUserMessage_message'] p {
+  display: inline !important;
+}
+
+// Collapse the spacing around messages.
+[class^='ChatUserMessage_messagePadding'],
+[class*=' ChatUserMessage_messagePadding'] {
+  padding: 0 !important;
+}
+
+// Transparent message row backgrounds.
+[class^='ChatUserMessage_background'],
+[class*=' ChatUserMessage_background'] {
+  background-color: transparent !important;
+}
+
+// Disguise moderators as normal users: hide badges and moderation menus.
+[class^='ChatUserMessage_user_'] [title*='Moderator'],
+[class*=' ChatUserMessage_user_'] [title*='Moderator'],
+[class^='ChatUserMessage_user_'] [aria-label*='moderator'],
+[class*=' ChatUserMessage_user_'] [aria-label*='moderator'],
+[class^='ChatUserMessage_user_'] svg,
+[class*=' ChatUserMessage_user_'] svg {
+  display: none !important;
+}
+[class^='ChatUserMessage_root'] [aria-label*='moderation'],
+[class*=' ChatUserMessage_root'] [aria-label*='moderation'],
+[class^='ChatUserMessage_root'] [aria-label*='moderator'],
+[class*=' ChatUserMessage_root'] [aria-label*='moderator'],
+[class^='ChatUserMessage_root'] [title*='Moderat'],
+[class*=' ChatUserMessage_root'] [title*='Moderat'] {
+  display: none !important;
 }
