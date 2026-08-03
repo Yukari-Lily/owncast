@@ -17,10 +17,11 @@
     // padding-right: 320px;
   }
 
-  // set height of player for tablet
+  // On narrow views let aspect-ratio: 16/9 (set above) size the player by
+  // width instead of a fixed px height, so it fills the stream width.
   @include screen(tablet) {
-    height: var(--player-container-height);
-    max-height: var(--player-container-height);
+    height: auto;
+    max-height: none;
   }
 
   .player,

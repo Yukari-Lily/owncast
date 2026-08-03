@@ -1,6 +1,5 @@
 import { useRecoilState, useRecoilValue } from 'recoil';
-import { Skeleton, Row, Button, Spin } from 'antd';
-import MessageFilled from '@ant-design/icons/MessageFilled';
+import { Skeleton, Row, Spin } from 'antd';
 import { FC, useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import classnames from 'classnames';
@@ -33,7 +32,6 @@ import { ExternalAction } from '../../../interfaces/external-action';
 import { Modal } from '../Modal/Modal';
 import { DesktopContent } from './DesktopContent';
 import { MobileContent } from './MobileContent';
-import { ChatModal } from '../../modals/ChatModal/ChatModal';
 import { Footer } from '../Footer/Footer';
 
 // Lazy loaded components
@@ -134,8 +132,6 @@ export const Content: FC = () => {
   const [supportsBrowserNotifications, setSupportsBrowserNotifications] = useState(false);
   const supportFediverseFeatures = fediverseEnabled;
 
-  const [showChatModal, setShowChatModal] = useState(false);
-
   const externalActionSelected = (action: ExternalAction) => {
     const { openExternally, url } = action;
 
@@ -217,6 +213,28 @@ export const Content: FC = () => {
     setCurrentBrowserWindowUrl(window.location.href);
   }, []);
 
+  useEffect(() => {
+    // On mobile, track the visual viewport so the layout shrinks when the
+    // soft keyboard opens. Without this the chat input sits behind the
+    // keyboard and the page scrolls, revealing a dark gap between the input
+    // and the keyboard.
+    if (!isMobile || typeof window === 'undefined' || !window.visualViewport) {
+      return undefined;
+    }
+    const vv = window.visualViewport;
+    const update = () => {
+      document.documentElement.style.setProperty('--app-vh', `${vv.height}px`);
+    };
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+      document.documentElement.style.removeProperty('--app-vh');
+    };
+  }, [isMobile]);
+
   const showChat = isChatAvailable && !chatDisabled && chatState === ChatState.VISIBLE;
 
   return (
@@ -230,55 +248,57 @@ export const Content: FC = () => {
             <Spin delay={2} size="large" tip="One moment..." />
           </div>
         )}
-        <Row>
-          {online && (
-            <OwncastPlayer
-              source="/hls/stream.m3u8"
-              online={online}
-              title={streamTitle || name}
-              className={styles.topSectionElement}
-            />
-          )}
-          {!online && !appState.appLoading && (
-            <div id="offline-message" style={{ width: '100%' }}>
-              <OfflineBanner
-                showsHeader={false}
-                streamName={name}
-                customText={offlineMessage}
-                notificationsEnabled={supportsBrowserNotifications}
-                fediverseAccount={fediverseAccount}
-                lastLive={lastDisconnectTime}
-                onNotifyClick={() => setShowNotifyModal(true)}
-                onFollowClick={() => setShowFollowModal(true)}
-                className={classnames([styles.topSectionElement, styles.offlineBanner])}
+        <div className={styles.streamSection}>
+          <Row>
+            {online && (
+              <OwncastPlayer
+                source="/hls/stream.m3u8"
+                online={online}
+                title={streamTitle || name}
+                className={styles.topSectionElement}
               />
-            </div>
-          )}
-        </Row>
-        <Row>
-          {isStreamLive && (
-            <Statusbar
-              online={online}
-              lastConnectTime={lastConnectTime}
-              lastDisconnectTime={lastDisconnectTime}
-              viewerCount={viewerCount}
-              className={classnames(styles.topSectionElement, styles.statusBar)}
+            )}
+            {!online && !appState.appLoading && (
+              <div id="offline-message" style={{ width: '100%' }}>
+                <OfflineBanner
+                  showsHeader={false}
+                  streamName={name}
+                  customText={offlineMessage}
+                  notificationsEnabled={supportsBrowserNotifications}
+                  fediverseAccount={fediverseAccount}
+                  lastLive={lastDisconnectTime}
+                  onNotifyClick={() => setShowNotifyModal(true)}
+                  onFollowClick={() => setShowFollowModal(true)}
+                  className={classnames([styles.topSectionElement, styles.offlineBanner])}
+                />
+              </div>
+            )}
+          </Row>
+          <Row>
+            {isStreamLive && (
+              <Statusbar
+                online={online}
+                lastConnectTime={lastConnectTime}
+                lastDisconnectTime={lastDisconnectTime}
+                viewerCount={viewerCount}
+                className={classnames(styles.topSectionElement, styles.statusBar)}
+              />
+            )}
+          </Row>
+          <Row>
+            <ActionButtons
+              supportFediverseFeatures={supportFediverseFeatures}
+              supportsBrowserNotifications={supportsBrowserNotifications}
+              showNotifyReminder={showNotifyReminder}
+              setShowNotifyModal={setShowNotifyModal}
+              disableNotifyReminderPopup={disableNotifyReminderPopup}
+              externalActions={externalActions || []}
+              setExternalActionToDisplay={setExternalActionToDisplay}
+              setShowFollowModal={setShowFollowModal}
+              externalActionSelected={externalActionSelected}
             />
-          )}
-        </Row>
-        <Row>
-          <ActionButtons
-            supportFediverseFeatures={supportFediverseFeatures}
-            supportsBrowserNotifications={supportsBrowserNotifications}
-            showNotifyReminder={showNotifyReminder}
-            setShowNotifyModal={setShowNotifyModal}
-            disableNotifyReminderPopup={disableNotifyReminderPopup}
-            externalActions={externalActions || []}
-            setExternalActionToDisplay={setExternalActionToDisplay}
-            setShowFollowModal={setShowFollowModal}
-            externalActionSelected={externalActionSelected}
-          />
-        </Row>
+          </Row>
+        </div>
 
         <Modal
           title="Browser Notifications"
@@ -288,22 +308,26 @@ export const Content: FC = () => {
         >
           <BrowserNotifyModal />
         </Modal>
-        <Row>
-          {!name && <Skeleton active loading style={{ marginLeft: '10vw', marginRight: '10vw' }} />}
-          {isMobile ? (
-            <MobileContent
-              name={name}
-              summary={summary}
-              tags={tags}
-              socialHandles={socialHandles}
-              extraPageContent={extraPageContent}
-              setShowFollowModal={setShowFollowModal}
-              supportFediverseFeatures={supportFediverseFeatures}
-              online={online}
-            />
-          ) : (
-            <div className={desktopStyles.bottomSectionContent}>
-              <DesktopContent
+        <div className={styles.contentSection}>
+          {showChat && isMobile && currentUser && (
+            <div className={styles.mobileChat}>
+              <ChatContainer
+                messages={messages}
+                usernameToHighlight={currentUser.displayName}
+                chatUserId={currentUser.id}
+                isModerator={currentUser.isModerator}
+                chatAvailable={isChatAvailable}
+                showInput={!!currentUser}
+                focusInput={false}
+              />
+            </div>
+          )}
+          <Row>
+            {!name && (
+              <Skeleton active loading style={{ marginLeft: '10vw', marginRight: '10vw' }} />
+            )}
+            {isMobile ? (
+              <MobileContent
                 name={name}
                 summary={summary}
                 tags={tags}
@@ -311,12 +335,25 @@ export const Content: FC = () => {
                 extraPageContent={extraPageContent}
                 setShowFollowModal={setShowFollowModal}
                 supportFediverseFeatures={supportFediverseFeatures}
+                online={online}
               />
-            </div>
-          )}
-        </Row>
-        <div style={{ flex: '1 1' }} />
-        <Footer />
+            ) : (
+              <div className={desktopStyles.bottomSectionContent}>
+                <DesktopContent
+                  name={name}
+                  summary={summary}
+                  tags={tags}
+                  socialHandles={socialHandles}
+                  extraPageContent={extraPageContent}
+                  setShowFollowModal={setShowFollowModal}
+                  supportFediverseFeatures={supportFediverseFeatures}
+                />
+              </div>
+            )}
+          </Row>
+          <div style={{ flex: '1 1' }} />
+          <Footer />
+        </div>
       </div>
       {showChat && !isMobile && currentUser && (
         <ChatContainer
@@ -347,23 +384,6 @@ export const Content: FC = () => {
           handleClose={() => setShowFollowModal(false)}
         />
       </Modal>
-      {isMobile && showChatModal && chatState === ChatState.VISIBLE && (
-        <ChatModal
-          messages={messages}
-          currentUser={currentUser}
-          handleClose={() => setShowChatModal(false)}
-        />
-      )}
-      {isMobile && isChatAvailable && !chatDisabled && (
-        <Button
-          id="mobile-chat-button"
-          type="primary"
-          onClick={() => setShowChatModal(true)}
-          className={styles.floatingMobileChatModalButton}
-        >
-          Chat <MessageFilled />
-        </Button>
-      )}
     </div>
   );
 };

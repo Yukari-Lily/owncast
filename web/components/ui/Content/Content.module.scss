@@ -5,6 +5,17 @@
   flex-direction: row;
   overflow: hidden;
   height: 100%;
+
+  @include screen(tablet) {
+    flex-direction: column;
+    // Dynamic viewport height so the pinned chat input isn't hidden behind
+    // the mobile browser's address bar. --app-vh (set from the Visual
+    // Viewport API in Content.tsx) also tracks the soft keyboard so the
+    // input stays pinned right above it. vh/dvh are fallbacks.
+    height: calc(100vh - var(--header-height));
+    height: calc(100dvh - var(--header-height));
+    height: calc(var(--app-vh, 100dvh) - var(--header-height));
+  }
 }
 
 .mainColumn {
@@ -12,6 +23,12 @@
   flex-direction: column;
   flex: 1 1 auto;
   overflow: auto;
+
+  @include screen(tablet) {
+    // On narrow views the column itself doesn't scroll; the inner
+    // .contentSection does, so the stream stays fixed on top.
+    overflow: hidden;
+  }
 }
 
 .mainColumn::-webkit-scrollbar,
@@ -126,18 +143,45 @@
   }
 }
 
-.floatingMobileChatModalButton {
-  position: fixed;
-  width: 100px;
-  height: 40px;
-  bottom: 40px;
-  right: var(--content-padding);
-  font-weight: 600;
-  font-size: 1em;
-  z-index: 99;
-  background-color: var(--theme-color-components-chat-background);
-  border-width: 0;
-  box-shadow: 0 1px 3px 1px rgb(0 0 0 / 20%);
+.streamSection {
+  // Player + status + actions. Fixed at the top on narrow views.
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+}
+
+.contentSection {
+  // Chat + page content + footer. Scrolls on narrow views; on desktop it
+  // fills the column so the spacer can pin the footer to the bottom.
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+
+  @include screen(tablet) {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: auto;
+    scrollbar-width: none; // Firefox - hide the chat-area scrollbar
+  }
+}
+
+// Hide the contentSection scrollbar on narrow views (webkit).
+.contentSection::-webkit-scrollbar,
+.contentSection::-webkit-scrollbar-thumb {
+  display: none;
+}
+
+.mobileChat {
+  display: flex;
+  flex-direction: column;
+
+  @include screen(tablet) {
+    // Fill the contentSection's first screen so the input pins to the
+    // viewport bottom. flex-shrink:0 keeps it from collapsing to 0.
+    flex: 0 0 auto;
+    height: 100%;
+    min-height: 0;
+  }
 }
 
 .centerSpinner {
