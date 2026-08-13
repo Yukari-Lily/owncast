@@ -19,7 +19,7 @@ export type EmojiPickerProps = {
   open?: boolean;
 };
 
-type EmojiRef = { name: string; url: string };
+type EmojiRef = { name: string; url: string; cover?: boolean };
 
 type PickerEntry = {
   host: HTMLDivElement;
@@ -78,15 +78,20 @@ function folderOf(url: string): string {
   return m ? m[1] : '其他';
 }
 
-// Tab thumbnail: prefer a file whose basename ends with _cover (e.g.
-// dy01_05_cover.png). Falls back to the first emoji in the folder.
+// Folder names often carry a numeric sort prefix used only to order the tabs
+// ("09" in "09梦限大"). Keep the raw folder as the grouping key, but drop the
+// prefix from the label shown on the tab. Pure-numeric names (e.g. "0001")
+// are left untouched.
+function folderLabel(folder: string): string {
+  return folder.replace(/^\d+\s*(?=\D)/, '');
+}
+
+// Tab thumbnail: prefer the folder's cover file (marked by the server, either
+// *_cover* like dy01_05_cover.png or a plain cover.png). Falls back to the
+// first emoji in the folder.
 function tabThumbUrl(emojis: EmojiRef[] | undefined): string | undefined {
   if (!emojis?.length) return undefined;
-  const cover = emojis.find(e => {
-    const m = String(e.url).match(/\/([^/]+)\.[^./]+$/);
-    if (!m) return false;
-    return m[1].endsWith('_cover');
-  });
+  const cover = emojis.find(e => e.cover);
   return (cover || emojis[0]).url;
 }
 
@@ -255,7 +260,7 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
         arr = [];
         map.set(folder, arr);
       }
-      arr.push({ name: e.name, url: e.url });
+      arr.push({ name: e.name, url: e.url, cover: e.cover });
     });
     return map;
   }, [customEmoji]);
@@ -266,8 +271,15 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
   const folderNames = useMemo(() => Array.from(groups.keys()), [groups]);
 
   const emojisFor = useCallback((key: string): EmojiRef[] => {
-    if (key === ALL) return (customEmojiRef.current as EmojiRef[]) || EMPTY;
-    return groupsRef.current.get(key) || EMPTY;
+    const list =
+      key === ALL
+        ? (customEmojiRef.current as EmojiRef[]) || EMPTY
+        : groupsRef.current.get(key) || EMPTY;
+    // Numbered cover files (e.g. 02_cover.png) double as the tab thumbnail
+    // AND a regular emoji at their sort position, so keep them in the grid.
+    // Only a bare cover file (cover.png with no sort number) stays tab-only.
+    const isBareCover = (e: EmojiRef) => /\/cover(?:\.[^.]+)?$/.test(e.url);
+    return list.filter(e => !isBareCover(e));
   }, []);
 
   // Build (or return cached) picmo picker for a tab key. Host stays hidden;
@@ -551,7 +563,7 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
   >(() => {
     const folderTabs = folderNames.map(f => ({
       key: f,
-      label: f,
+      label: folderLabel(f),
       thumb: tabThumbUrl(groups.get(f)),
     }));
     return [{ key: ALL, label: 'ALL', icon: <AllIcon /> }, ...folderTabs];

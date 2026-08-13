@@ -2,6 +2,7 @@ package events
 
 import (
 	"bytes"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -139,7 +140,42 @@ var (
 	emojiModTime      time.Time
 	emojiHTMLFormat   = `<img src="{{ .URL }}" class="emoji" alt=":{{ .Name }}:" title=":{{ .Name }}:">`
 	emojiHTMLTemplate = template.Must(template.New("emojiHTML").Parse(emojiHTMLFormat))
+
+	// goldmark-emoji's parser only treats shortcodes built from ASCII
+	// alphanumerics plus `_`, `-` and `+` as emoji, so custom emoji whose names
+	// contain non-ASCII characters (e.g. Chinese) are never matched and would be
+	// left as literal `:name:` text. Match those candidates before markdown runs
+	// so they can be swapped for the emoji <img>; ASCII shortcodes are left for
+	// goldmark-emoji to handle as before. Whitespace is allowed inside the name
+	// (custom emoji names may contain spaces); only line breaks are excluded so
+	// a shortcode can't span multiple lines. Unknown names are returned
+	// unchanged by the caller's emojiHTML lookup, so over-matching is harmless.
+	nonASCIIEmojiShortcodeRe = regexp.MustCompile(`:[^:\r\n]*[^\x00-\x7f][^:\r\n]*:`)
 )
+
+// renderUnicodeEmojiShortcodes replaces known custom-emoji shortcodes that
+// contain non-ASCII characters with their emoji <img> HTML. Shortcodes that
+// don't match a known emoji are returned unchanged. Callers must hold emojiMu.
+func renderUnicodeEmojiShortcodes(raw string) string {
+	return nonASCIIEmojiShortcodeRe.ReplaceAllStringFunc(raw, func(shortcode string) string {
+		name := shortcode[1 : len(shortcode)-1]
+		if html, ok := emojiHTML[strings.ToLower(name)]; ok {
+			return html
+		}
+		return shortcode
+	})
+}
+
+// emojiImageURL percent-encodes an emoji file URL before it is emitted in an
+// <img src> attribute. Custom emoji file names can contain spaces and
+// non-ASCII characters (e.g. "/img/emoji/09梦限大/01 阿拉蕾呜哇.png"), and a
+// raw URL with a space is rejected by the sanitizer (it fails URL parsing),
+// which strips the src and leaves a broken image. The browser requests the
+// encoded path, which the emoji image handler decodes back to the real file
+// name on disk.
+func emojiImageURL(raw string) string {
+	return (&url.URL{Path: raw}).String()
+}
 
 func loadEmoji() {
 	modTime, err := data.UpdateEmojiList(false)
@@ -157,14 +193,17 @@ func loadEmoji() {
 		emojiArr := make([]emojiDef.Emoji, 0)
 
 		for i := 0; i < len(emojiList); i++ {
+			singleEmoji := emojiList[i]
+			singleEmoji.URL = emojiImageURL(singleEmoji.URL)
+
 			var buf bytes.Buffer
-			err := emojiHTMLTemplate.Execute(&buf, emojiList[i])
+			err := emojiHTMLTemplate.Execute(&buf, singleEmoji)
 			if err != nil {
 				return
 			}
-			emojiHTML[strings.ToLower(emojiList[i].Name)] = buf.String()
+			emojiHTML[strings.ToLower(singleEmoji.Name)] = buf.String()
 
-			emoji := emojiDef.NewEmoji(emojiList[i].Name, nil, strings.ToLower(emojiList[i].Name))
+			emoji := emojiDef.NewEmoji(singleEmoji.Name, nil, strings.ToLower(singleEmoji.Name))
 			emojiArr = append(emojiArr, emoji)
 		}
 
@@ -209,6 +248,10 @@ func RenderMarkdown(raw string) string {
 	emojiMu.Lock()
 	defer emojiMu.Unlock()
 
+	// Render non-ASCII custom emoji shortcodes (e.g. :中文:) to <img> before
+	// markdown parsing, since goldmark-emoji cannot parse them.
+	raw = renderUnicodeEmojiShortcodes(raw)
+
 	markdown := goldmark.New(
 		goldmark.WithRendererOptions(
 			html.WithUnsafe(),
@@ -246,7 +289,10 @@ func RenderMarkdown(raw string) string {
 }
 
 var (
-	_sanitizeReSrcMatch    = regexp.MustCompile(`(?i)^/img/emoji/[^\.%]*.[A-Z]*$`)
+	// Allow the percent-encoded emoji URLs emitted by emojiImageURL (spaces and
+	// non-ASCII become %XX), while still rejecting dots and whitespace in the
+	// path portion so path traversal and raw-space URLs stay out.
+	_sanitizeReSrcMatch    = regexp.MustCompile(`(?i)^/img/emoji/[^.\s]*\.[A-Z]*$`)
 	_sanitizeReClassMatch  = regexp.MustCompile(`(?i)^(emoji)[A-Z_]*?$`)
 	_sanitizeNonEmptyMatch = regexp.MustCompile(`^.+$`)
 )

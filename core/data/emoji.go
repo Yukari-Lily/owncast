@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,22 @@ var (
 	emojiCacheData    = make([]models.CustomEmoji, 0)
 	emojiCacheModTime time.Time
 )
+
+// normalizeEmojiName strips a leading numeric sort prefix used only to order
+// emoji in the picker, so it doesn't leak into the shortcode:
+// "01 阿拉蕾呜哇" -> "阿拉蕾呜哇". Ordering is preserved because the number
+// stays in the file path/URL that drives WalkDir order. Pure-numeric ASCII
+// names like "0001" (no separator) are left untouched. "_cover" is dropped as
+// before so *_cover* files still share the shortcode of their base name.
+func normalizeEmojiName(fileBase string) string {
+	fileBase = strings.TrimSuffix(fileBase, "_cover")
+	if i := strings.IndexByte(fileBase, ' '); i > 0 {
+		if _, err := strconv.Atoi(fileBase[:i]); err == nil {
+			fileBase = fileBase[i+1:]
+		}
+	}
+	return fileBase
+}
 
 // UpdateEmojiList will update the cache (if required) and
 // return the modifiation time.
@@ -62,10 +79,21 @@ func UpdateEmojiList(force bool) (time.Time, error) {
 				emojiPath := filepath.Join(config.EmojiDir, path)
 				fileName := d.Name()
 				fileBase := fileName[:len(fileName)-len(filepath.Ext(fileName))]
-				// Optional tab thumbnail marker: foo_cover.png is still the
-				// shortcode :foo: (picker uses *_cover* URL as the tab icon).
-				fileBase = strings.TrimSuffix(fileBase, "_cover")
-				singleEmoji := models.CustomEmoji{Name: fileBase, URL: emojiPath}
+
+				name := normalizeEmojiName(fileBase)
+				// Prefix the shortcode with the folder name so emojis that share
+				// a base name in different tabs (folders) stay distinct after
+				// sending: 09梦限大/阿拉蕾呜哇.png -> :09梦限大-阿拉蕾呜哇:.
+				// Root-level emojis (admin uploads) keep their plain name.
+				if folder := filepath.Dir(path); folder != "." {
+					name = folder + "-" + name
+				}
+
+				singleEmoji := models.CustomEmoji{
+					Name:  name,
+					URL:   emojiPath,
+					Cover: strings.HasSuffix(fileBase, "_cover") || fileBase == "cover",
+				}
 				emojiCacheData = append(emojiCacheData, singleEmoji)
 				return nil
 			}
