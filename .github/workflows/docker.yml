@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
-      - master
     tags:
       - "v*"
+    paths-ignore:
+      - 'static/img/emoji/**'
+      - 'data/**'
 
 env:
   DOCKERHUB_IMAGE: yukarilily/owncast
