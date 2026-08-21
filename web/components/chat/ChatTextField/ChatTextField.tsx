@@ -259,6 +259,14 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
         return;
       }
 
+      // Tab always toggles the emoji picker, regardless of what has focus,
+      // instead of moving focus between elements.
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        setEmojiOpen(open => !open);
+        return;
+      }
+
       if (event.key === 'Enter') {
         if (isTextEntryTarget(event.target) || isInteractiveTarget(event.target)) return;
         event.preventDefault();
