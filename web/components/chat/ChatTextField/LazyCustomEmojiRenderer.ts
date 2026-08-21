@@ -11,6 +11,8 @@ import type { LazyLoader } from 'picmo/dist/LazyLoader';
 export class LazyCustomEmojiRenderer extends NativeRenderer {
   private readonly eagerUrls: ReadonlySet<string>;
 
+  private readonly pendingResolvers = new Set<() => void>();
+
   constructor(eagerUrls: ReadonlySet<string> = new Set()) {
     super();
     this.eagerUrls = eagerUrls;
@@ -23,11 +25,24 @@ export class LazyCustomEmojiRenderer extends NativeRenderer {
 
     if (!resolver) return element;
 
-    if (!lazyLoader || this.eagerUrls.has(emoji.url)) {
+    let resolved = false;
+    const resolve = () => {
+      if (resolved) return;
+      resolved = true;
+      this.pendingResolvers.delete(resolve);
       resolver();
+    };
+
+    if (!lazyLoader || this.eagerUrls.has(emoji.url)) {
+      resolve();
       return element;
     }
 
-    return lazyLoader.lazyLoad(element as HTMLElement, resolver);
+    this.pendingResolvers.add(resolve);
+    return lazyLoader.lazyLoad(element as HTMLElement, resolve);
+  }
+
+  resolveAll(): void {
+    Array.from(this.pendingResolvers).forEach(resolve => resolve());
   }
 }

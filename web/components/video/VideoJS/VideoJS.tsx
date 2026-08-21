@@ -81,9 +81,5 @@ export const VideoJS: FC<VideoJSProps> = ({ options, onReady, 'aria-label': aria
     };
   }, [ariaLabel, options]);
 
-  return (
-    <div data-vjs-player>
-      <div ref={videoRef} />
-    </div>
-  );
+  return <div ref={videoRef} data-vjs-player className={styles.player} />;
 };

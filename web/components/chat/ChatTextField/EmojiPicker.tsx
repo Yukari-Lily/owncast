@@ -29,6 +29,7 @@ type EmojiRef = { name: string; url: string; cover?: boolean };
 
 type PickerEntry = {
   host: HTMLDivElement;
+  renderer: LazyCustomEmojiRenderer;
   // picmo's createPicker return type is not exported cleanly; keep loose.
   picker: {
     destroy: () => void;
@@ -328,6 +329,7 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
         isAll && backgroundEmojiPrefetchAllowed()
           ? new Set(list.slice(0, ALL_INITIAL_IMAGE_COUNT).map(emoji => emoji.url))
           : new Set<string>();
+      const renderer = new LazyCustomEmojiRenderer(eagerUrls);
       const picker = createPicker({
         rootElement: host,
         theme: 'dark',
@@ -342,10 +344,10 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
         showRecents: isAll,
         showCategoryTabs: false,
         showSearch: false,
-        renderer: new LazyCustomEmojiRenderer(eagerUrls),
+        renderer,
       });
 
-      const entry: PickerEntry = { host, picker };
+      const entry: PickerEntry = { host, picker, renderer };
 
       picker.addEventListener('emoji:select', event => {
         // This handler fires before picmo runs its own recents addOrUpdate, so
@@ -489,10 +491,15 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
   // (width:0; min-width:100%) does not collapse mid-hide animation.
   // Showing the active tab is handled by the activeGroup effect below (also
   // re-runs when open flips true).
+  const hasOpenedRef = useRef(false);
   useLayoutEffect(() => {
     const hostsRoot = hostsRootRef.current;
     const shell = hostsRoot?.parentElement as HTMLElement | null;
     if (open) {
+      if (hasOpenedRef.current && backgroundEmojiPrefetchAllowed()) {
+        cacheRef.current.forEach(entry => entry.renderer.resolveAll());
+      }
+      hasOpenedRef.current = true;
       if (hostsRoot) hostsRoot.style.display = '';
       // Clear close-time size freeze so fit-content tracks picmo again.
       if (shell) {
@@ -501,7 +508,7 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
         shell.style.minWidth = '';
         shell.style.minHeight = '';
       }
-      return;
+      return undefined;
     }
     // Capture full open size before hiding hosts (they drive fit-content).
     if (shell) {
@@ -516,6 +523,11 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
     if (hostsRoot) hostsRoot.style.display = 'none';
     // Keep cache + hosts mounted. Pending reveal timers are fine: opacity 1
     // while hidden is harmless and avoids stuck opacity-0 after cancel.
+    if (!hasOpenedRef.current || !backgroundEmojiPrefetchAllowed()) return undefined;
+    const hydrateTimer = window.setTimeout(() => {
+      cacheRef.current.forEach(entry => entry.renderer.resolveAll());
+    }, 0);
+    return () => window.clearTimeout(hydrateTimer);
   }, [open]);
 
   // Tab switch / reopen: pure show/hide of cached hosts (or create on demand).
