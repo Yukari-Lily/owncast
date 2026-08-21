@@ -6,7 +6,7 @@ export interface SocketMessage {
 }
 
 export default class WebsocketService {
-  websocket: WebSocket;
+  websocket: WebSocket | null;
 
   accessToken: string;
 
@@ -14,7 +14,7 @@ export default class WebsocketService {
 
   path: string;
 
-  websocketReconnectTimer: ReturnType<typeof setTimeout>;
+  websocketReconnectTimer: ReturnType<typeof setTimeout> | null;
 
   isShutdown = false;
 
@@ -22,14 +22,15 @@ export default class WebsocketService {
 
   handleMessage?: (message: SocketEvent) => void;
 
-  socketConnected: () => void;
+  socketConnected?: () => void;
 
-  socketDisconnected: () => void;
+  socketDisconnected?: () => void;
 
   constructor(accessToken, path, host) {
     this.accessToken = accessToken;
     this.path = path;
     this.websocketReconnectTimer = null;
+    this.websocket = null;
     this.isShutdown = false;
     this.host = host;
 
@@ -50,34 +51,57 @@ export default class WebsocketService {
 
     const url = new URL(this.host);
     url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    url.pathname = '/ws';
+    url.pathname = this.path;
     url.port = window.location.port === '3000' ? '8080' : window.location.port;
     url.searchParams.append('accessToken', this.accessToken);
 
     const ws = new WebSocket(url.toString());
-    ws.onopen = this.onOpen.bind(this);
-    ws.onerror = this.onError.bind(this);
+    ws.onopen = () => this.onOpen(ws);
+    ws.onerror = () => this.onError(ws);
+    ws.onclose = () => this.onClose(ws);
     ws.onmessage = this.onMessage.bind(this);
 
     this.websocket = ws;
   }
 
-  onOpen() {
+  onOpen(ws: WebSocket) {
+    if (ws !== this.websocket || this.isShutdown) {
+      return;
+    }
+
     if (this.websocketReconnectTimer) {
       clearTimeout(this.websocketReconnectTimer);
+      this.websocketReconnectTimer = null;
     }
-    this.socketConnected();
+    this.socketConnected?.();
     this.backOff = 0;
   }
 
-  // On ws error just close the socket and let it re-connect again for now.
-  onError() {
-    handleNetworkingError();
-    this.socketDisconnected();
-    this.websocket.close();
-    if (!this.isShutdown) {
-      this.scheduleReconnect();
+  // Closing funnels all reconnect scheduling through onClose so an error and
+  // its corresponding close event cannot create two sockets.
+  onError(ws: WebSocket) {
+    if (ws !== this.websocket || this.isShutdown) {
+      return;
     }
+
+    handleNetworkingError();
+    if (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN) {
+      ws.close();
+    }
+  }
+
+  onClose(ws: WebSocket) {
+    if (ws !== this.websocket) {
+      return;
+    }
+
+    this.websocket = null;
+    if (this.isShutdown) {
+      return;
+    }
+
+    this.socketDisconnected?.();
+    this.scheduleReconnect();
   }
 
   scheduleReconnect() {
@@ -86,10 +110,13 @@ export default class WebsocketService {
     }
 
     if (this.websocketReconnectTimer) {
-      clearTimeout(this.websocketReconnectTimer);
+      return;
     }
     this.websocketReconnectTimer = setTimeout(
-      this.createAndConnect,
+      () => {
+        this.websocketReconnectTimer = null;
+        this.createAndConnect();
+      },
       Math.min(this.backOff, 10_000),
     );
     this.backOff += 1000;
@@ -97,7 +124,12 @@ export default class WebsocketService {
 
   shutdown() {
     this.isShutdown = true;
-    this.websocket.close();
+    if (this.websocketReconnectTimer) {
+      clearTimeout(this.websocketReconnectTimer);
+      this.websocketReconnectTimer = null;
+    }
+    this.websocket?.close();
+    this.websocket = null;
   }
 
   /*
@@ -137,18 +169,25 @@ export default class WebsocketService {
   }
 
   isConnected(): boolean {
-    return this.websocket?.readyState === this.websocket?.OPEN;
+    return this.websocket?.readyState === WebSocket.OPEN;
   }
 
   // Outbound: Other components can pass an object to `send`.
-  send(socketEvent: any) {
+  send(socketEvent: any): boolean {
     // Sanity check that what we're sending is a valid type.
     if (!socketEvent.type || !MessageType[socketEvent.type]) {
       console.warn(`Outbound message: Unknown socket message type: "${socketEvent.type}" sent.`);
     }
 
+    const { websocket } = this;
+    if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+      console.warn('Outbound websocket message skipped because chat is disconnected.');
+      return false;
+    }
+
     const messageJSON = JSON.stringify(socketEvent);
-    this.websocket.send(messageJSON);
+    websocket.send(messageJSON);
+    return true;
   }
 
   // Reply to a PING as a keep alive.

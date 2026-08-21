@@ -26,11 +26,15 @@ function getCurrentlyPlayingSegment(tech) {
 }
 
 class PlaybackMetrics {
-  constructor(player, videojs) {
+  constructor(player) {
     this.player = player;
+    this.tech = null;
+    this.textTracks = null;
+    this.vhsXhr = null;
     this.supportsDetailedMetrics = false;
     this.hasPerformedInitialVariantChange = false;
     this.clockSkewMs = 0;
+    this.stopped = false;
 
     this.segmentDownloadTime = [];
     this.bandwidthTracking = [];
@@ -49,6 +53,10 @@ class PlaybackMetrics {
     this.send = this.send.bind(this);
     this.collectPlaybackMetrics = this.collectPlaybackMetrics.bind(this);
     this.handleNoLongerBuffering = this.handleNoLongerBuffering.bind(this);
+    this.handleUsage = this.handleUsage.bind(this);
+    this.handleCueChange = this.handleCueChange.bind(this);
+    this.handleSegmentResponse = this.handleSegmentResponse.bind(this);
+    this.setupXhrHooks = this.setupXhrHooks.bind(this);
     this.sendMetricsTimer = 0;
 
     this.player.on('canplaythrough', this.handleNoLongerBuffering);
@@ -57,28 +65,7 @@ class PlaybackMetrics {
     this.player.on('waiting', this.handleBuffering);
     this.player.on('playing', this.handlePlaying);
     this.player.on('ended', this.handleEnded);
-
-    // Keep a reference of the standard vjs xhr function.
-    const oldVjsXhrCallback = videojs.xhr;
-
-    // Override the xhr function to track segment download time.
-    // eslint-disable-next-line no-param-reassign
-    videojs.Vhs.xhr = (...args) => {
-      if (args[0].uri.match('.ts')) {
-        const start = new Date();
-
-        const cb = args[1];
-        // eslint-disable-next-line no-param-reassign
-        args[1] = (request, error, response) => {
-          const end = new Date();
-          const delta = end.getTime() - start.getTime();
-          this.trackSegmentDownloadTime(delta);
-          cb(request, error, response);
-        };
-      }
-
-      return oldVjsXhrCallback(...args);
-    };
+    this.player.on('xhr-hooks-ready', this.setupXhrHooks);
 
     this.videoJSReady();
 
@@ -88,8 +75,29 @@ class PlaybackMetrics {
   }
 
   stop() {
+    if (this.stopped) {
+      return;
+    }
+
+    this.stopped = true;
     clearInterval(this.sendMetricsTimer);
-    this.player.off();
+    clearInterval(this.collectPlaybackMetricsTimer);
+    clearTimeout(this.bufferingDurationTimer);
+
+    this.player.off('canplaythrough', this.handleNoLongerBuffering);
+    this.player.off('error', this.handleError);
+    this.player.off('stalled', this.handleBuffering);
+    this.player.off('waiting', this.handleBuffering);
+    this.player.off('playing', this.handlePlaying);
+    this.player.off('ended', this.handleEnded);
+    this.player.off('xhr-hooks-ready', this.setupXhrHooks);
+    this.tech?.off('usage', this.handleUsage);
+    this.textTracks?.removeEventListener('cuechange', this.handleCueChange);
+    this.vhsXhr?.offResponse?.(this.handleSegmentResponse);
+
+    this.vhsXhr = null;
+    this.textTracks = null;
+    this.tech = null;
   }
 
   // Keep our client clock in sync with the server clock to determine
@@ -100,24 +108,62 @@ class PlaybackMetrics {
 
   videoJSReady() {
     const tech = this.player.tech({ IWillNotUseThisInPlugins: true });
-    this.supportsDetailedMetrics = !!tech;
+    this.tech = tech;
+    this.supportsDetailedMetrics = !!tech?.vhs;
 
-    tech?.on('usage', e => {
-      if (e.name === 'vhs-unknown-waiting') {
-        this.setIsBuffering(true);
-      }
-
-      if (e.name === 'vhs-rendition-change-abr') {
-        // Quality variant has changed
-        this.incrementQualityVariantChanges();
-      }
-    });
+    tech?.on('usage', this.handleUsage);
 
     // Variant changed
-    const trackElements = this.player.textTracks();
-    trackElements.addEventListener('cuechange', () => {
+    this.textTracks = this.player.textTracks();
+    this.textTracks.addEventListener('cuechange', this.handleCueChange);
+    this.setupXhrHooks();
+  }
+
+  setupXhrHooks() {
+    if (this.stopped) {
+      return;
+    }
+
+    const tech = this.player.tech({ IWillNotUseThisInPlugins: true });
+    const vhsXhr = tech?.vhs?.xhr;
+
+    if (!vhsXhr?.onResponse || this.vhsXhr === vhsXhr) {
+      return;
+    }
+
+    this.vhsXhr?.offResponse?.(this.handleSegmentResponse);
+    this.vhsXhr = vhsXhr;
+    this.vhsXhr.onResponse(this.handleSegmentResponse);
+  }
+
+  handleSegmentResponse(request) {
+    if (this.stopped) {
+      return;
+    }
+
+    if (!request?.uri || !/\.ts(?:$|[?#])/i.test(request.uri)) {
+      return;
+    }
+
+    if (!Number.isFinite(request.requestTime)) {
+      return;
+    }
+
+    this.trackSegmentDownloadTime(Date.now() - request.requestTime);
+  }
+
+  handleUsage(event) {
+    if (event.name === 'vhs-unknown-waiting') {
+      this.setIsBuffering(true);
+    }
+
+    if (event.name === 'vhs-rendition-change-abr') {
       this.incrementQualityVariantChanges();
-    });
+    }
+  }
+
+  handleCueChange() {
+    this.incrementQualityVariantChanges();
   }
 
   handlePlaying() {
@@ -160,9 +206,9 @@ class PlaybackMetrics {
 
   setIsBuffering(isBuffering) {
     this.isBuffering = isBuffering;
+    clearTimeout(this.bufferingDurationTimer);
 
     if (!isBuffering) {
-      clearTimeout(this.bufferingDurationTimer);
       return;
     }
 
@@ -184,6 +230,10 @@ class PlaybackMetrics {
   }
 
   collectPlaybackMetrics() {
+    if (this.stopped) {
+      return;
+    }
+
     const tech = this.player.tech({ IWillNotUseThisInPlugins: true });
     if (!tech || !tech.vhs) {
       return;
@@ -227,6 +277,10 @@ class PlaybackMetrics {
   }
 
   async send() {
+    if (this.stopped) {
+      return;
+    }
+
     if (this.segmentDownloadTime.length === 0) {
       return;
     }

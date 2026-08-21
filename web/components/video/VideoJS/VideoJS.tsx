@@ -37,39 +37,53 @@ function ensureCacheBustHook() {
 export type VideoJSProps = {
   options: any;
   onReady: (player: VideoJsPlayer, vjsInstance: typeof videojs) => void;
+  'aria-label'?: string;
 };
 
-export const VideoJS: FC<VideoJSProps> = ({ options, onReady }) => {
-  const videoRef = React.useRef<HTMLVideoElement | null>(null);
+export const VideoJS: FC<VideoJSProps> = ({ options, onReady, 'aria-label': ariaLabel }) => {
+  const videoRef = React.useRef<HTMLDivElement | null>(null);
   const playerRef = React.useRef<VideoJsPlayer | null>(null);
+  const onReadyRef = React.useRef(onReady);
+
+  onReadyRef.current = onReady;
 
   React.useEffect(() => {
-    // Make sure Video.js player is only initialized once
-    if (!playerRef.current) {
-      const videoElement = videoRef.current;
-
-      // eslint-disable-next-line no-multi-assign
-      const player: VideoJsPlayer = (playerRef.current = videojs(
-        videoElement,
-        options,
-        () => onReady && onReady(player, videojs),
-      ));
-
-      player.autoplay(options.autoplay);
-      player.src(options.sources);
+    if (!videoRef.current) {
+      return undefined;
     }
 
-    // Register after player/src setup so VHS is present on videojs.
+    // React Strict Mode mounts effects twice in development. Creating the
+    // element here gives each Video.js instance a fresh element after dispose.
+    const videoElement = document.createElement('video-js');
+    videoElement.className = `video-js vjs-big-play-centered vjs-show-big-play-button-on-pause ${styles.player} vjs-owncast`;
+    if (ariaLabel) {
+      videoElement.setAttribute('aria-label', ariaLabel);
+    }
+    videoRef.current.appendChild(videoElement);
+
+    // Register before the source handler starts its first playlist request.
     ensureCacheBustHook();
-  }, [options, videoRef]);
+
+    const player: VideoJsPlayer = videojs(videoElement, options, () => {
+      onReadyRef.current?.(player, videojs);
+    });
+    playerRef.current = player;
+    // Some Video.js builds expose VHS only after the first player is created.
+    ensureCacheBustHook();
+
+    return () => {
+      if (!player.isDisposed()) {
+        player.dispose();
+      }
+      if (playerRef.current === player) {
+        playerRef.current = null;
+      }
+    };
+  }, [ariaLabel, options]);
 
   return (
     <div data-vjs-player>
-      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-      <video
-        ref={videoRef}
-        className={`video-js vjs-big-play-centered vjs-show-big-play-button-on-pause ${styles.player} vjs-owncast`}
-      />
+      <div ref={videoRef} />
     </div>
   );
 };

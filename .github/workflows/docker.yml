@@ -7,6 +7,7 @@ on:
     tags:
       - "v*"
     paths-ignore:
+      # Emoji are mirrored from the repository by a separate runtime sync job.
       - 'static/img/emoji/**'
       - 'data/**'
 

@@ -20,10 +20,13 @@ import (
 )
 
 var (
-	emojiCacheMu      sync.Mutex
-	emojiCacheData    = make([]models.CustomEmoji, 0)
-	emojiCacheModTime time.Time
+	emojiCacheMu       sync.Mutex
+	emojiCacheData     = make([]models.CustomEmoji, 0)
+	emojiCacheModTime  time.Time
+	emojiCacheLastScan time.Time
 )
+
+const emojiCacheScanInterval = 5 * time.Second
 
 // normalizeEmojiName strips a leading numeric sort prefix used only to order
 // emoji in the picker, so it doesn't leak into the shortcode:
@@ -41,78 +44,108 @@ func normalizeEmojiName(fileBase string) string {
 	return fileBase
 }
 
+func emojiTreeModTime() (time.Time, error) {
+	var newest time.Time
+	err := fs.WalkDir(os.DirFS(config.CustomEmojiPath), ".", func(_ string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if info.ModTime().After(newest) {
+			newest = info.ModTime()
+		}
+		return nil
+	})
+	if err != nil {
+		return time.Time{}, fmt.Errorf("unable to inspect custom emoji directory: %w", err)
+	}
+	return newest, nil
+}
+
 // UpdateEmojiList will update the cache (if required) and
 // return the modifiation time.
 func UpdateEmojiList(force bool) (time.Time, error) {
-	var modTime time.Time
-
-	emojiPathInfo, err := os.Stat(config.CustomEmojiPath)
-	if err != nil {
-		return modTime, err
+	emojiCacheMu.Lock()
+	defer emojiCacheMu.Unlock()
+	if !force && !emojiCacheLastScan.IsZero() && time.Since(emojiCacheLastScan) < emojiCacheScanInterval {
+		return emojiCacheModTime, nil
 	}
 
-	modTime = emojiPathInfo.ModTime()
+	modTime, err := emojiTreeModTime()
+	if err != nil {
+		return emojiCacheModTime, err
+	}
+	scanTime := time.Now()
 
-	if modTime.After(emojiCacheModTime) || force {
-		emojiCacheMu.Lock()
-		defer emojiCacheMu.Unlock()
+	if !modTime.After(emojiCacheModTime) && !force {
+		emojiCacheLastScan = scanTime
+		return emojiCacheModTime, nil
+	}
 
-		// double-check that another thread didn't update this while waiting.
-		if modTime.After(emojiCacheModTime) || force {
-			emojiCacheModTime = modTime
-			if force {
-				emojiCacheModTime = time.Now()
-			}
-
-			emojiFS := os.DirFS(config.CustomEmojiPath)
-			if emojiFS == nil {
-				return modTime, fmt.Errorf("unable to open custom emoji directory")
-			}
-
-			emojiCacheData = make([]models.CustomEmoji, 0)
-
-			walkFunction := func(path string, d os.DirEntry, err error) error {
-				if d == nil || d.IsDir() {
-					return nil
-				}
-
-				emojiPath := filepath.Join(config.EmojiDir, path)
-				fileName := d.Name()
-				fileBase := fileName[:len(fileName)-len(filepath.Ext(fileName))]
-
-				name := normalizeEmojiName(fileBase)
-				// Prefix the shortcode with the folder name so emojis that share
-				// a base name in different tabs (folders) stay distinct after
-				// sending: 09梦限大/阿拉蕾呜哇.png -> :09梦限大-阿拉蕾呜哇:.
-				// Root-level emojis (admin uploads) keep their plain name.
-				if folder := filepath.Dir(path); folder != "." {
-					name = folder + "-" + name
-				}
-
-				singleEmoji := models.CustomEmoji{
-					Name:  name,
-					URL:   emojiPath,
-					Cover: strings.HasSuffix(fileBase, "_cover") || fileBase == "cover",
-				}
-				emojiCacheData = append(emojiCacheData, singleEmoji)
-				return nil
-			}
-
-			if err := fs.WalkDir(emojiFS, ".", walkFunction); err != nil {
-				log.Errorln("unable to fetch emojis: " + err.Error())
-			}
+	nextModTime := modTime
+	if force {
+		if now := time.Now(); now.After(nextModTime) {
+			nextModTime = now
+		}
+		if !nextModTime.After(emojiCacheModTime) {
+			nextModTime = emojiCacheModTime.Add(time.Nanosecond)
 		}
 	}
+
+	emojiFS := os.DirFS(config.CustomEmojiPath)
+
+	nextEmojiData := make([]models.CustomEmoji, 0)
+
+	walkFunction := func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d == nil || d.IsDir() {
+			return nil
+		}
+
+		emojiPath := filepath.Join(config.EmojiDir, path)
+		fileName := d.Name()
+		fileBase := fileName[:len(fileName)-len(filepath.Ext(fileName))]
+
+		name := normalizeEmojiName(fileBase)
+		// Prefix the shortcode with the folder name so emojis that share
+		// a base name in different tabs (folders) stay distinct after
+		// sending: 09梦限大/阿拉蕾呜哇.png -> :09梦限大-阿拉蕾呜哇:.
+		// Root-level emojis (admin uploads) keep their plain name.
+		if folder := filepath.Dir(path); folder != "." {
+			name = folder + "-" + name
+		}
+
+		singleEmoji := models.CustomEmoji{
+			Name:  name,
+			URL:   emojiPath,
+			Cover: strings.HasSuffix(fileBase, "_cover") || fileBase == "cover",
+		}
+		nextEmojiData = append(nextEmojiData, singleEmoji)
+		return nil
+	}
+
+	if err := fs.WalkDir(emojiFS, ".", walkFunction); err != nil {
+		return emojiCacheModTime, fmt.Errorf("unable to fetch emojis: %w", err)
+	}
+	emojiCacheLastScan = scanTime
+	emojiCacheData = nextEmojiData
+	emojiCacheModTime = nextModTime
+	modTime = nextModTime
 
 	return modTime, nil
 }
 
 // GetEmojiList returns a list of custom emoji from the emoji directory.
 func GetEmojiList() []models.CustomEmoji {
-	_, err := UpdateEmojiList(false)
-	if err != nil {
-		return nil
-	}
+	// A transient scan failure should not replace a previously valid API
+	// response with null. Keep serving the last complete snapshot and retry on
+	// the next scan.
+	_, _ = UpdateEmojiList(false)
 
 	// Lock to make sure this doesn't get updated in the middle of reading
 	emojiCacheMu.Lock()

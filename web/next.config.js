@@ -4,9 +4,12 @@ const withBundleAnalyzer = require('@next/bundle-analyzer')({
 });
 const { PHASE_DEVELOPMENT_SERVER } = require('next/constants');
 const runtimeCaching = require('next-pwa/cache');
+const createPWA = require('next-pwa');
+const { isApiOrAdminRequest, isEmojiRequest } = require('./worker/cache-routes');
 
-const withPWA = require('next-pwa')({
+const withPWA = createPWA({
   dest: 'public',
+  customWorkerDir: 'worker',
   runtimeCaching: [
     // NetworkOnly exclusions MUST precede `...runtimeCaching`: workbox uses
     // the first matching route, and next-pwa's defaults end with a same-origin
@@ -25,12 +28,18 @@ const withPWA = require('next-pwa')({
       handler: 'NetworkOnly',
     },
     {
-      urlPattern: /^\/admin\/.*$/,
+      urlPattern: isApiOrAdminRequest,
       handler: 'NetworkOnly',
     },
     {
-      urlPattern: /^\/api\/.*$/,
-      handler: 'NetworkOnly',
+      urlPattern: isEmojiRequest,
+      handler: 'StaleWhileRevalidate',
+      options: {
+        cacheName: 'emoji-images',
+        expiration: {
+          maxEntries: 1200,
+        },
+      },
     },
     ...runtimeCaching,
   ],
@@ -86,7 +95,17 @@ module.exports = async phase => {
           unoptimized: true,
         },
         swcMinify: true,
-        transpilePackages: [ "antd", "@ant-design", "rc-util", "rc-pagination", "rc-picker", "rc-notification", "rc-tooltip", "rc-tree", "rc-table" ],
+        transpilePackages: [
+          'antd',
+          '@ant-design',
+          'rc-util',
+          'rc-pagination',
+          'rc-picker',
+          'rc-notification',
+          'rc-tooltip',
+          'rc-tree',
+          'rc-table',
+        ],
         webpack(config) {
           config.module.rules.push({
             test: /\.svg$/i,

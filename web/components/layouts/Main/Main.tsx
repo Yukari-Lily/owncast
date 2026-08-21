@@ -28,7 +28,6 @@ import { ServerRenderedHydration } from '../../ServerRendered/ServerRenderedHydr
 import { Theme } from '../../theme/Theme';
 import { ViewerPasswordGate } from '../../modals/ViewerPasswordGate/ViewerPasswordGate';
 import styles from './Main.module.scss';
-import { PushNotificationServiceWorker } from '../../workers/PushNotificationServiceWorker/PushNotificationServiceWorker';
 import { AppStateOptions } from '../../stores/application-state';
 import { Noscript } from '../../ui/Noscript/Noscript';
 import { ServerStatus } from '../../../interfaces/server-status.model';
@@ -167,7 +166,6 @@ export const Main: FC = () => {
       >
         <ClientConfigStore />
       </ErrorBoundary>
-      <PushNotificationServiceWorker />
       <TitleNotifier name={name} />
       <Theme />
       <Script strategy="afterInteractive" src="/customjavascript" />

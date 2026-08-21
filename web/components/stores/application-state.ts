@@ -137,7 +137,15 @@ const appStateModel =
         },
       },
       serverFailure: {
-        type: 'final',
+        meta: LOADING_STATE,
+        on: {
+          LOADED: {
+            target: 'ready',
+          },
+          NEEDS_REGISTER: {
+            target: 'serverFailure',
+          },
+        },
       },
       userfailure: {
         type: 'final',

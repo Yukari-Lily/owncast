@@ -10,6 +10,9 @@ export interface ClientConfigStaticService {
 class ClientConfigService {
   public static async getConfig(): Promise<ClientConfig> {
     const response = await fetch(ENDPOINT);
+    if (!response.ok) {
+      throw new Error(`Unable to load client config (${response.status})`);
+    }
     const status = await response.json();
     return status;
   }

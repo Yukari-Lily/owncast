@@ -1,5 +1,5 @@
 import { Popover } from 'antd';
-import React, { FC, useEffect, useState } from 'react';
+import React, { FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useRecoilValue } from 'recoil';
 import sanitizeHtml from 'sanitize-html';
 import Graphemer from 'graphemer';
@@ -11,6 +11,7 @@ import WebsocketService from '../../../services/websocket-service';
 import { websocketServiceAtom } from '../../stores/ClientConfigStore';
 import { MessageType } from '../../../interfaces/socket-events';
 import styles from './ChatTextField.module.scss';
+import { CustomEmoji, revalidateEmojiList } from './emojiApi';
 
 // Lazy loaded components
 
@@ -146,7 +147,11 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
   const [characterCount, setCharacterCount] = useState(defaultText?.length);
   const websocketService = useRecoilValue<WebsocketService>(websocketServiceAtom);
   const [contentEditable, setContentEditable] = useState(null);
-  const [customEmoji, setCustomEmoji] = useState([]);
+  const [customEmoji, setCustomEmoji] = useState<CustomEmoji[]>([]);
+  const [emojiPickerReady, setEmojiPickerReady] = useState(false);
+  const emojiEtagRef = useRef<string>();
+  const emojiRequestRef = useRef<Promise<void>>();
+  const emojiAbortRef = useRef<AbortController>();
   // Track popover open so EmojiPicker can hide hosts on close (cache stays warm)
   // and freeze shell size so the hide animation does not reflow.
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -157,7 +162,11 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
     if (!enabled) return undefined;
     let cancelled = false;
     const prefetch = () => {
-      if (!cancelled) loadEmojiPicker();
+      if (!cancelled) {
+        loadEmojiPicker().then(() => {
+          if (!cancelled) setEmojiPickerReady(true);
+        });
+      }
     };
     let idleId: number | undefined;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -194,8 +203,9 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
     const count = graphemer.countGraphemes(message);
     if (count === 0 || count > characterLimit) return;
 
-    websocketService.send({ type: MessageType.CHAT, body: message });
-    contentEditable.innerHTML = '';
+    if (websocketService.send({ type: MessageType.CHAT, body: message })) {
+      contentEditable.innerHTML = '';
+    }
   };
 
   const focusContentEditableAtEnd = (defer = true) => {
@@ -370,27 +380,48 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
     document.getElementById('chat-input-content-editable').focus({ preventScroll: true });
   }, []);
 
-  const getCustomEmoji = async () => {
-    try {
-      const response = await fetch(`/api/emoji`);
-      const emoji = await response.json();
-      setCustomEmoji(emoji);
+  const getCustomEmoji = useCallback(() => {
+    if (emojiRequestRef.current) return emojiRequestRef.current;
 
-      emoji.forEach(e => {
-        const preImg = document.createElement('link');
-        preImg.href = e.url;
-        preImg.rel = 'preload';
-        preImg.as = 'image';
-        document.head.appendChild(preImg);
+    const controller = new AbortController();
+    emojiAbortRef.current = controller;
+    const request = revalidateEmojiList(emojiEtagRef.current, controller.signal)
+      .then(result => {
+        if (result.etag) emojiEtagRef.current = result.etag;
+        if ('emojis' in result) setCustomEmoji(result.emojis);
+      })
+      .catch(e => {
+        if (e?.name !== 'AbortError') console.error('cannot fetch custom emoji', e);
+      })
+      .finally(() => {
+        if (emojiAbortRef.current === controller) emojiAbortRef.current = undefined;
+        emojiRequestRef.current = undefined;
       });
-    } catch (e) {
-      console.error('cannot fetch custom emoji', e);
-    }
-  };
+    emojiRequestRef.current = request;
+    return request;
+  }, []);
 
   useEffect(() => {
     getCustomEmoji();
-  }, []);
+
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') getCustomEmoji();
+    }, 120_000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') getCustomEmoji();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      emojiAbortRef.current?.abort();
+    };
+  }, [getCustomEmoji]);
+
+  useEffect(() => {
+    if (emojiOpen) getCustomEmoji();
+  }, [emojiOpen, getCustomEmoji]);
 
   return (
     <div id="chat-input" className={styles.root}>
@@ -420,6 +451,10 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
               // Keep the React shell mounted so EmojiPicker can retain warm picmo
               // hosts across open/close (hide-only on close).
               destroyTooltipOnHide={false}
+              // rc-tooltip forwards this Trigger option even though its public
+              // Tooltip prop type omits it. It lets the idle-loaded ALL picker
+              // build while the popover is still closed.
+              {...({ forceRender: true } as any)}
               open={emojiOpen}
               onOpenChange={setEmojiOpen}
               // A tall picker should stay above the composer instead of being
@@ -429,12 +464,14 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
               // bounds from creating page scrollbars.
               overlayStyle={{ position: 'fixed' }}
               content={
-                <EmojiPicker
-                  open={emojiOpen}
-                  customEmoji={customEmoji}
-                  onEmojiSelect={onEmojiSelect}
-                  onCustomEmojiSelect={onCustomEmojiSelect}
-                />
+                (emojiPickerReady || emojiOpen) && (
+                  <EmojiPicker
+                    open={emojiOpen}
+                    customEmoji={customEmoji}
+                    onEmojiSelect={onEmojiSelect}
+                    onCustomEmojiSelect={onCustomEmojiSelect}
+                  />
+                )
               }
               trigger="click"
               placement="topRight"

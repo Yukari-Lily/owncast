@@ -10,6 +10,12 @@ import React, {
 import { createPicker } from 'picmo';
 import type { Emoji } from 'emojibase';
 import { attachSmoothWheelScroll } from '../../../utils/smoothWheelScroll';
+import { LazyCustomEmojiRenderer } from './LazyCustomEmojiRenderer';
+import {
+  backgroundEmojiPrefetchAllowed,
+  prefetchPriorityEmoji,
+  startAdaptiveEmojiPrefetch,
+} from './emojiPrefetch';
 
 export type EmojiPickerProps = {
   onEmojiSelect: (emoji: string) => void;
@@ -36,8 +42,7 @@ type PickerEntry = {
 const MAX_RECENTS = 10;
 const ALL = '__all__';
 const EMPTY: EmojiRef[] = [];
-// Idle-prewarm at most this many non-ALL folders beyond the active tab.
-const IDLE_PREWARM_LIMIT = 2;
+const ALL_INITIAL_IMAGE_COUNT = 48;
 
 // picmo hashes the emoji dataset with crypto.subtle.digest to detect changes.
 // crypto.subtle is only exposed in secure contexts (HTTPS / localhost), so on
@@ -319,6 +324,10 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
       }));
 
       const isAll = key === ALL;
+      const eagerUrls =
+        isAll && backgroundEmojiPrefetchAllowed()
+          ? new Set(list.slice(0, ALL_INITIAL_IMAGE_COUNT).map(emoji => emoji.url))
+          : new Set<string>();
       const picker = createPicker({
         rootElement: host,
         theme: 'dark',
@@ -333,6 +342,7 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
         showRecents: isAll,
         showCategoryTabs: false,
         showSearch: false,
+        renderer: new LazyCustomEmojiRenderer(eagerUrls),
       });
 
       const entry: PickerEntry = { host, picker };
@@ -374,7 +384,38 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
       const attachEmojiAreaScroll = () => {
         const area = host.querySelector('.picmo__emojiArea, .emojiArea') as HTMLElement | null;
         if (!area || entry.detachScroll) return;
-        entry.detachScroll = attachSmoothWheelScroll(area, 'y');
+        const detachSmoothScroll = attachSmoothWheelScroll(area, 'y');
+        if (!isAll) {
+          entry.detachScroll = detachSmoothScroll;
+          return;
+        }
+
+        let animationFrame: number | undefined;
+        const prefetchAdjacentRows = () => {
+          animationFrame = undefined;
+          if (!backgroundEmojiPrefetchAllowed()) return;
+          const visibleCount = ALL_INITIAL_IMAGE_COUNT;
+          const maxStart = Math.max(0, list.length - visibleCount);
+          const scrollRange = Math.max(1, area.scrollHeight - area.clientHeight);
+          const currentStart = Math.round((area.scrollTop / scrollRange) * maxStart);
+          const adjacentStart = Math.max(0, currentStart - visibleCount);
+          const adjacentEnd = Math.min(list.length, currentStart + visibleCount * 2);
+          prefetchPriorityEmoji(
+            list.slice(adjacentStart, adjacentEnd).map(emoji => emoji.url),
+            2,
+          );
+        };
+        const handleScroll = () => {
+          if (animationFrame === undefined) {
+            animationFrame = window.requestAnimationFrame(prefetchAdjacentRows);
+          }
+        };
+        area.addEventListener('scroll', handleScroll, { passive: true });
+        entry.detachScroll = () => {
+          detachSmoothScroll();
+          area.removeEventListener('scroll', handleScroll);
+          if (animationFrame !== undefined) window.cancelAnimationFrame(animationFrame);
+        };
       };
 
       let revealed = false;
@@ -491,9 +532,21 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
     prevCustomEmojiRef.current = customEmoji;
     cacheRef.current.forEach(destroyEntry);
     cacheRef.current.clear();
-    if (!customEmoji?.length) return;
+    if (!customEmoji?.length) {
+      activeGroupRef.current = ALL;
+      setActiveGroup(ALL);
+      return;
+    }
+    const nextGroup =
+      activeGroupRef.current === ALL || groupsRef.current.has(activeGroupRef.current)
+        ? activeGroupRef.current
+        : ALL;
+    if (nextGroup !== activeGroupRef.current) {
+      activeGroupRef.current = nextGroup;
+      setActiveGroup(nextGroup);
+    }
     if (openRef.current) {
-      showTab(activeGroupRef.current);
+      showTab(nextGroup);
     } else {
       // Rebuild ALL in the background so the next open is still warm.
       ensurePicker(ALL);
@@ -509,34 +562,15 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
     [],
   );
 
-  // Once emoji data is ready, idle-prewarm the default ALL tab (and a couple of
-  // nearby folders). Safe while closed — ensurePicker no longer requires open.
+  // Prebuild the default ALL grid while closed. The custom renderer keeps all
+  // but the first visible page as placeholders, so creating the picker does not
+  // turn into hundreds of image requests.
   useEffect(() => {
     if (!customEmoji?.length || typeof window === 'undefined') return undefined;
     let cancelled = false;
     const run = () => {
       if (cancelled) return;
       ensurePicker(ALL);
-      if (cancelled) return;
-      const keys = folderNames.filter(k => !cacheRef.current.has(k));
-      const activeIdx = folderNames.indexOf(
-        activeGroupRef.current === ALL ? folderNames[0] : activeGroupRef.current,
-      );
-      const ordered = keys.slice().sort((a, b) => {
-        const da = Math.abs(folderNames.indexOf(a) - activeIdx);
-        const db = Math.abs(folderNames.indexOf(b) - activeIdx);
-        return da - db;
-      });
-      ordered.slice(0, IDLE_PREWARM_LIMIT).forEach(k => {
-        if (!cancelled) {
-          emojisFor(k).forEach(e => {
-            if (!e.url) return;
-            const img = new Image();
-            img.src = e.url;
-          });
-          ensurePicker(k);
-        }
-      });
     };
     let idleId: number | undefined;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -552,7 +586,26 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
       }
       if (timeoutId !== undefined) clearTimeout(timeoutId);
     };
-  }, [customEmoji, folderNames, ensurePicker, emojisFor]);
+  }, [customEmoji, ensurePicker]);
+
+  // Warm only what is needed for an instant first paint: every folder cover
+  // and the first 48 ALL entries. Remaining images are handled by Picmo's
+  // IntersectionObserver and the playback-aware background queue below.
+  useEffect(() => {
+    if (!customEmoji?.length || !backgroundEmojiPrefetchAllowed()) return;
+    const coverUrls = Array.from(groups.values())
+      .map(tabThumbUrl)
+      .filter((url): url is string => Boolean(url));
+    const initialUrls = emojisFor(ALL)
+      .slice(0, ALL_INITIAL_IMAGE_COUNT)
+      .map(emoji => emoji.url);
+    prefetchPriorityEmoji([...coverUrls, ...initialUrls]);
+  }, [customEmoji, groups, emojisFor]);
+
+  useEffect(() => {
+    if (!customEmoji?.length) return undefined;
+    return startAdaptiveEmojiPrefetch(emojisFor(ALL).map(emoji => emoji.url));
+  }, [customEmoji, emojisFor]);
 
   // Tab list: [ALL] [<folder>...]. "ALL" uses a grid icon; each folder tab
   // uses *_cover* if present, otherwise the first emoji in that folder.
@@ -576,65 +629,18 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
     return attachSmoothWheelScroll(el, 'x');
   }, []);
 
-  // Warm tab thumbnails so the strip doesn't paint empty boxes on first open.
-  useEffect(() => {
-    tabs.forEach(t => {
-      if (!t.thumb) return;
-      const img = new Image();
-      img.src = t.thumb;
-    });
-  }, [tabs]);
-
   // Prefetch a tab's picmo instance + image URLs on hover/focus so the click
   // is usually a pure show. Works while open or closed (cache survives close).
   const prewarmTab = useCallback(
     (key: string) => {
-      if (cacheRef.current.has(key)) return;
-      // Warm images first so they are in HTTP cache when picmo mounts them.
-      emojisFor(key).forEach(e => {
-        if (!e.url) return;
-        const img = new Image();
-        img.src = e.url;
-      });
+      if (!backgroundEmojiPrefetchAllowed()) return;
+      if (!cacheRef.current.has(key)) {
+        prefetchPriorityEmoji(emojisFor(key).map(emoji => emoji.url));
+      }
       ensurePicker(key);
     },
     [emojisFor, ensurePicker],
   );
-
-  // While open, idle-prewarm a couple of nearby folders as the user moves around
-  // the tab strip (mount-time prewarm already covers ALL + initial neighbors).
-  useEffect(() => {
-    if (!open || typeof window === 'undefined') return undefined;
-    let cancelled = false;
-    const run = () => {
-      if (cancelled) return;
-      const keys = folderNames.filter(k => k !== activeGroup && !cacheRef.current.has(k));
-      // Prefer neighbors of the active folder in tab order.
-      const activeIdx = folderNames.indexOf(activeGroup === ALL ? folderNames[0] : activeGroup);
-      const ordered = keys.slice().sort((a, b) => {
-        const da = Math.abs(folderNames.indexOf(a) - activeIdx);
-        const db = Math.abs(folderNames.indexOf(b) - activeIdx);
-        return da - db;
-      });
-      ordered.slice(0, IDLE_PREWARM_LIMIT).forEach(k => {
-        if (!cancelled) prewarmTab(k);
-      });
-    };
-    let idleId: number | undefined;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    if ('requestIdleCallback' in window) {
-      idleId = window.requestIdleCallback(run, { timeout: 3000 });
-    } else {
-      timeoutId = setTimeout(run, 800);
-    }
-    return () => {
-      cancelled = true;
-      if (idleId !== undefined && 'cancelIdleCallback' in window) {
-        window.cancelIdleCallback(idleId);
-      }
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
-    };
-  }, [open, activeGroup, folderNames, prewarmTab]);
 
   // Root is width:fit-content so its size is driven by the picmo child
   // (--picker-width, which custom CSS may enlarge). The tab strip uses the

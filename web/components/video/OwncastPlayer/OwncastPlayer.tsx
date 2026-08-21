@@ -16,11 +16,6 @@ import { ComponentError } from '../../ui/ComponentError/ComponentError';
 
 const PLAYER_VOLUME = 'owncast_volume';
 
-const ping = new ViewerPing();
-let playbackMetrics = null;
-let latencyCompensator = null;
-let latencyCompensatorEnabled = false;
-
 export type OwncastPlayerProps = {
   source: string;
   online: boolean;
@@ -38,49 +33,61 @@ export const OwncastPlayer: FC<OwncastPlayerProps> = ({
 }) => {
   const VideoSettingsService = useContext(VideoSettingsServiceContext);
   const playerRef = React.useRef(null);
+  const pingRef = React.useRef<ViewerPing | null>(null);
+  const playbackMetricsRef = React.useRef<PlaybackMetrics | null>(null);
+  const latencyCompensatorRef = React.useRef<LatencyCompensator | null>(null);
+  const latencyCompensatorEnabledRef = React.useRef(false);
   const [videoPlaying, setVideoPlaying] = useRecoilState<boolean>(isVideoPlayingAtom);
   const clockSkew = useRecoilValue<Number>(clockSkewAtom);
+  const clockSkewRef = React.useRef(clockSkew);
 
-  const setSavedVolume = () => {
+  if (!pingRef.current) {
+    pingRef.current = new ViewerPing();
+  }
+  clockSkewRef.current = clockSkew;
+
+  const setSavedVolume = player => {
     try {
-      playerRef.current.volume(getLocalStorage(PLAYER_VOLUME) || 1);
+      player.volume(getLocalStorage(PLAYER_VOLUME) || 1);
     } catch (err) {
       console.warn(err);
     }
   };
 
-  const handleVolume = () => {
-    setLocalStorage(PLAYER_VOLUME, playerRef.current.muted() ? 0 : playerRef.current.volume());
+  const handleVolume = player => {
+    setLocalStorage(PLAYER_VOLUME, player.muted() ? 0 : player.volume());
   };
 
-  const startLatencyCompensator = () => {
-    if (latencyCompensator) {
-      latencyCompensator.stop();
-    }
+  const stopLatencyCompensator = React.useCallback(() => {
+    latencyCompensatorRef.current?.dispose();
+    latencyCompensatorRef.current = null;
+    latencyCompensatorEnabledRef.current = false;
+  }, []);
 
-    latencyCompensatorEnabled = true;
+  const startLatencyCompensator = React.useCallback(
+    player => {
+      if (!player || player.isDisposed()) {
+        return;
+      }
 
-    latencyCompensator = new LatencyCompensator(playerRef.current);
-    latencyCompensator.setClockSkew(clockSkew);
-    latencyCompensator.enable();
-  };
-
-  const stopLatencyCompensator = () => {
-    if (latencyCompensator) {
-      latencyCompensator.disable();
-    }
-    latencyCompensator = null;
-    latencyCompensatorEnabled = false;
-  };
+      stopLatencyCompensator();
+      const compensator = new LatencyCompensator(player);
+      compensator.setClockSkew(clockSkewRef.current);
+      compensator.enable();
+      latencyCompensatorRef.current = compensator;
+      latencyCompensatorEnabledRef.current = true;
+    },
+    [stopLatencyCompensator],
+  );
 
   // Toggle minimized latency mode. Return the new state.
   const toggleLatencyCompensator = () => {
-    if (latencyCompensatorEnabled) {
+    if (latencyCompensatorEnabledRef.current) {
       stopLatencyCompensator();
     } else {
-      startLatencyCompensator();
+      startLatencyCompensator(playerRef.current);
     }
-    return latencyCompensatorEnabled;
+    return latencyCompensatorEnabledRef.current;
   };
 
   const setupLatencyCompensator = player => {
@@ -91,18 +98,24 @@ export const OwncastPlayer: FC<OwncastPlayerProps> = ({
       return;
     }
 
-    startLatencyCompensator();
+    if (!latencyCompensatorRef.current) {
+      startLatencyCompensator(player);
+    }
   };
 
   const createSettings = async (player, videojs) => {
     const videoQualities = await VideoSettingsService.getVideoQualities();
+    if (player.isDisposed() || playerRef.current !== player) {
+      return;
+    }
+
     setupLatencyCompensator(player);
     const menuButton = createVideoSettingsMenuButton(
       player,
       videojs,
       videoQualities,
       toggleLatencyCompensator,
-      latencyCompensatorEnabled,
+      latencyCompensatorEnabledRef.current,
     );
     player.controlBar.addChild(
       menuButton,
@@ -125,7 +138,7 @@ export const OwncastPlayer: FC<OwncastPlayerProps> = ({
         // eslint-disable-next-line class-methods-use-this
         handleClick() {
           try {
-            const videoElement = document.getElementsByTagName('video')[0];
+            const videoElement = player.el().querySelector('video');
             (videoElement as any).webkitShowPlaybackTargetPicker();
           } catch (e) {
             console.error(e);
@@ -139,46 +152,50 @@ export const OwncastPlayer: FC<OwncastPlayerProps> = ({
     }
   };
 
-  const videoJsOptions = {
-    autoplay: false,
-    controls: true,
-    responsive: true,
-    fluid: false,
-    fill: true,
-    playsinline: true,
-    liveui: true,
-    preload: 'auto',
-    muted: initiallyMuted,
-    controlBar: {
-      progressControl: {
-        seekBar: false,
+  const videoJsOptions = React.useMemo(
+    () => ({
+      autoplay: false,
+      controls: true,
+      responsive: true,
+      fluid: false,
+      fill: true,
+      playsinline: true,
+      liveui: true,
+      preload: 'auto',
+      muted: initiallyMuted,
+      controlBar: {
+        progressControl: {
+          seekBar: false,
+        },
       },
-    },
-    html5: {
-      vhs: {
-        // used to select the lowest bitrate playlist initially. This helps to decrease playback start time. This setting is false by default.
-        enableLowInitialPlaylist: true,
-        experimentalBufferBasedABR: true,
-        useNetworkInformationApi: true,
-        maxPlaylistRetries: 30,
+      html5: {
+        vhs: {
+          // used to select the lowest bitrate playlist initially. This helps to decrease playback start time. This setting is false by default.
+          enableLowInitialPlaylist: true,
+          experimentalBufferBasedABR: true,
+          useNetworkInformationApi: true,
+          maxPlaylistRetries: 30,
+        },
       },
-    },
-    liveTracker: {
-      trackingThreshold: 0,
-      liveTolerance: 15,
-    },
-    sources: [
-      {
-        src: source,
-        type: 'application/x-mpegURL',
+      liveTracker: {
+        trackingThreshold: 0,
+        liveTolerance: 15,
       },
-    ],
-  };
+      sources: [
+        {
+          src: source,
+          type: 'application/x-mpegURL',
+        },
+      ],
+    }),
+    [initiallyMuted, source],
+  );
 
   const handlePlayerReady = (player, videojs) => {
     playerRef.current = player;
-    setSavedVolume();
+    setSavedVolume(player);
     setupAirplay(player, videojs);
+    setupLatencyCompensator(player);
 
     // You can handle player events here, for example:
     player.on('waiting', () => {
@@ -187,49 +204,58 @@ export const OwncastPlayer: FC<OwncastPlayerProps> = ({
 
     player.on('dispose', () => {
       console.debug('player will dispose');
-      ping.stop();
+      if (playerRef.current !== player) {
+        return;
+      }
+
+      pingRef.current?.stop();
+      playbackMetricsRef.current?.stop();
+      playbackMetricsRef.current = null;
+      stopLatencyCompensator();
+      playerRef.current = null;
+      setVideoPlaying(false);
     });
 
     player.on('playing', () => {
       console.debug('player is playing');
-      ping.start();
+      pingRef.current?.start();
       setVideoPlaying(true);
     });
 
     player.on('pause', () => {
       console.debug('player is paused');
-      ping.stop();
+      pingRef.current?.stop();
       setVideoPlaying(false);
     });
 
     player.on('ended', () => {
       console.debug('player is ended');
-      ping.stop();
+      pingRef.current?.stop();
       setVideoPlaying(false);
     });
 
-    videojs.hookOnce();
+    player.on('volumechange', () => handleVolume(player));
 
-    player.on('volumechange', handleVolume);
+    playbackMetricsRef.current?.stop();
+    playbackMetricsRef.current = new PlaybackMetrics(player);
+    playbackMetricsRef.current.setClockSkew(clockSkewRef.current);
 
-    playbackMetrics = new PlaybackMetrics(player, videojs);
-    playbackMetrics.setClockSkew(clockSkew);
-
-    createSettings(player, videojs);
+    createSettings(player, videojs).catch(error => console.error(error));
   };
 
   useEffect(() => {
-    if (playbackMetrics) {
-      playbackMetrics.setClockSkew(clockSkew);
-    }
+    playbackMetricsRef.current?.setClockSkew(clockSkew);
+    latencyCompensatorRef.current?.setClockSkew(clockSkew);
   }, [clockSkew]);
 
   useEffect(
     () => () => {
       stopLatencyCompensator();
-      playbackMetrics?.stop();
+      playbackMetricsRef.current?.stop();
+      playbackMetricsRef.current = null;
+      pingRef.current?.stop();
     },
-    [],
+    [stopLatencyCompensator],
   );
 
   return (

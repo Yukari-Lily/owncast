@@ -1,3 +1,5 @@
+import { isTimeBuffered } from './bufferedRanges';
+
 /*
 The Owncast Latency Compensator.
 
@@ -78,29 +80,37 @@ class LatencyCompensator {
     this.checkTimer = 0;
     this.bufferingCounter = 0;
     this.bufferingTimer = 0;
+    this.jumpResetTimer = 0;
+    this.bufferingAmnestyTimers = new Set();
     this.playbackRate = 1.0;
     this.lastJumpOccurred = null;
     this.startupTime = new Date();
     this.clockSkewMs = 0;
     this.currentLatency = null;
+    this.disposed = false;
 
     // Keep track of all the latencies we encountered buffering events
     // in order to determine a new minimum latency.
     this.bufferedAtLatency = [];
 
-    this.player.on('playing', this.handlePlaying.bind(this));
-    this.player.on('pause', this.handlePause.bind(this));
-    this.player.on('error', this.handleError.bind(this));
-    this.player.on('waiting', this.handleBuffering.bind(this));
-    this.player.on('stalled', this.handleBuffering.bind(this));
-    this.player.on('ended', this.handleEnded.bind(this));
-    this.player.on('canplaythrough', this.handlePlaying.bind(this));
-    this.player.on('canplay', this.handlePlaying.bind(this));
-
     this.check = this.check.bind(this);
     this.start = this.start.bind(this);
     this.enable = this.enable.bind(this);
     this.countBufferingEvent = this.countBufferingEvent.bind(this);
+    this.handlePlaying = this.handlePlaying.bind(this);
+    this.handlePause = this.handlePause.bind(this);
+    this.handleError = this.handleError.bind(this);
+    this.handleBuffering = this.handleBuffering.bind(this);
+    this.handleEnded = this.handleEnded.bind(this);
+
+    this.player.on('playing', this.handlePlaying);
+    this.player.on('pause', this.handlePause);
+    this.player.on('error', this.handleError);
+    this.player.on('waiting', this.handleBuffering);
+    this.player.on('stalled', this.handleBuffering);
+    this.player.on('ended', this.handleEnded);
+    this.player.on('canplaythrough', this.handlePlaying);
+    this.player.on('canplay', this.handlePlaying);
   }
 
   // To keep our client clock in sync with the server clock to determine
@@ -114,6 +124,10 @@ class LatencyCompensator {
 
   // This is run on a timer to check if we should be compensating for latency.
   check() {
+    if (this.disposed || !this.player) {
+      return;
+    }
+
     // We have an arbitrary delay at startup to allow the player to run
     // normally and hopefully get a bit of a buffer of segments before we
     // start messing with it.
@@ -258,9 +272,7 @@ class LatencyCompensator {
           );
 
           // Verify we have the seek position buffered before jumping.
-          const availableBufferedTimeEnd = tech.vhs.stats.buffered[0].end;
-          const availableBufferedTimeStart = tech.vhs.stats.buffered[0].start;
-          if (seekPosition > availableBufferedTimeStart < availableBufferedTimeEnd) {
+          if (isTimeBuffered(seekPosition, tech.vhs.stats.buffered)) {
             this.jump(seekPosition);
 
             return;
@@ -332,13 +344,17 @@ class LatencyCompensator {
     console.info('current time', this.player.currentTime(), 'seeking to', seekPosition);
     this.player.currentTime(seekPosition);
 
-    setTimeout(() => {
+    clearTimeout(this.jumpResetTimer);
+    this.jumpResetTimer = setTimeout(() => {
       this.jumpingToLiveIgnoreBuffer = false;
     }, 5000);
   }
 
   setPlaybackRate(rate) {
     this.playbackRate = rate;
+    if (!this.player || this.player.isDisposed?.()) {
+      return;
+    }
     this.player.playbackRate(rate);
   }
 
@@ -360,6 +376,10 @@ class LatencyCompensator {
   }
 
   enable() {
+    if (this.disposed) {
+      return;
+    }
+
     this.enabled = true;
     clearInterval(this.checkTimer);
     clearTimeout(this.bufferingTimer);
@@ -373,12 +393,35 @@ class LatencyCompensator {
   disable() {
     clearInterval(this.checkTimer);
     clearTimeout(this.timeoutTimer);
+    clearTimeout(this.bufferingTimer);
+    clearTimeout(this.jumpResetTimer);
+    this.bufferingAmnestyTimers.forEach(timer => clearTimeout(timer));
+    this.bufferingAmnestyTimers.clear();
+    this.jumpingToLiveIgnoreBuffer = false;
     this.stop();
     this.enabled = false;
   }
 
+  dispose() {
+    if (this.disposed) {
+      return;
+    }
+
+    this.disable();
+    this.player.off('playing', this.handlePlaying);
+    this.player.off('pause', this.handlePause);
+    this.player.off('error', this.handleError);
+    this.player.off('waiting', this.handleBuffering);
+    this.player.off('stalled', this.handleBuffering);
+    this.player.off('ended', this.handleEnded);
+    this.player.off('canplaythrough', this.handlePlaying);
+    this.player.off('canplay', this.handlePlaying);
+    this.disposed = true;
+    this.player = null;
+  }
+
   timeout() {
-    if (this.jumpingToLiveIgnoreBuffer) {
+    if (this.disposed || this.jumpingToLiveIgnoreBuffer) {
       return;
     }
 
@@ -443,6 +486,10 @@ class LatencyCompensator {
   }
 
   countBufferingEvent() {
+    if (this.disposed) {
+      return;
+    }
+
     this.bufferingCounter += 1;
 
     if (this.bufferingCounter > REBUFFER_EVENT_LIMIT) {
@@ -460,11 +507,13 @@ class LatencyCompensator {
     );
 
     // Allow us to forget about old buffering events if enough time goes by.
-    setTimeout(() => {
+    const amnestyTimer = setTimeout(() => {
       if (this.bufferingCounter > 0) {
         this.bufferingCounter -= 1;
       }
+      this.bufferingAmnestyTimers.delete(amnestyTimer);
     }, BUFFERING_AMNESTY_DURATION);
+    this.bufferingAmnestyTimers.add(amnestyTimer);
   }
 
   handleBuffering() {

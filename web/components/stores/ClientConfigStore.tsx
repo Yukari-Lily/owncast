@@ -35,9 +35,7 @@ const SERVER_STATUS_POLL_DURATION = 5000;
 const ACCESS_TOKEN_KEY = 'accessToken';
 const VIEWER_AUTH_KEY = 'viewerAuthenticated';
 
-let serverStatusRefreshPoll: ReturnType<typeof setInterval>;
 let hasBeenModeratorNotified = false;
-let hasWebsocketDisconnected = false;
 
 const serverConnectivityError = `Cannot connect to the service. Please check your internet connection and try again later.`;
 
@@ -125,7 +123,7 @@ export const isChatAvailableSelector = selector({
   get: ({ get }) => {
     const state: AppStateOptions = get(appStateAtom);
     const accessToken: string = get(accessTokenAtom);
-    return accessToken && state.chatAvailable && !hasWebsocketDisconnected;
+    return Boolean(accessToken && state.chatAvailable);
   },
 });
 
@@ -191,8 +189,10 @@ export const ClientConfigStore: FC = () => {
     useRecoilState<boolean>(viewerAuthenticatedAtom);
   const setViewerAuthCheckComplete = useSetRecoilState<boolean>(viewerAuthCheckCompleteAtom);
   const registrationAttempted = useRef(false);
-
-  let ws: WebsocketService;
+  const websocketRef = useRef<WebsocketService | null>(null);
+  const handleMessageRef = useRef<(message: SocketEvent) => void>();
+  const getChatHistoryRef = useRef<() => Promise<void>>();
+  const chatHistoryRequestRef = useRef<Promise<void>>();
 
   const setGlobalFatalError = (title: string, message: string) => {
     setGlobalFatalErrorMessage({
@@ -206,7 +206,7 @@ export const ClientConfigStore: FC = () => {
   };
 
   const handleStatusChange = (status: ServerStatus) => {
-    if (appState.matches('loading')) {
+    if (appState.matches('loading') || appState.matches('serverFailure')) {
       const events = [AppStateEvent.Loaded];
       if (status.online) {
         events.push(AppStateEvent.Online);
@@ -340,7 +340,9 @@ export const ClientConfigStore: FC = () => {
     setLocalStorage(ACCESS_TOKEN_KEY, '');
     setAccessToken(null);
     registrationAttempted.current = false;
-    ws?.shutdown();
+    websocketRef.current?.shutdown();
+    websocketRef.current = null;
+    setWebsocketService(null);
     handleUserRegistration();
   };
 
@@ -360,14 +362,6 @@ export const ClientConfigStore: FC = () => {
     } else {
       setHiddenMessageIds(currentState => [...currentState, ...ids]);
     }
-  };
-
-  const handleSocketDisconnect = () => {
-    hasWebsocketDisconnected = true;
-  };
-
-  const handleSocketConnected = () => {
-    hasWebsocketDisconnected = false;
   };
 
   const handleMessage = (message: SocketEvent) => {
@@ -429,45 +423,42 @@ export const ClientConfigStore: FC = () => {
     }
   };
 
+  handleMessageRef.current = handleMessage;
+
   const getChatHistory = async () => {
-    try {
-      const messages = await ChatService.getChatHistory(accessToken);
-      if (messages) {
-        setChatMessages(currentState => {
-          const existingIds = new Set(currentState.map(m => m.id));
-          const newMessages = messages.filter(m => !m.id || !existingIds.has(m.id));
-          return [...currentState, ...newMessages];
-        });
+    if (chatHistoryRequestRef.current) {
+      await chatHistoryRequestRef.current;
+      return;
+    }
+
+    const request = (async () => {
+      try {
+        const messages = await ChatService.getChatHistory(accessToken);
+        if (messages) {
+          setChatMessages(currentState => {
+            const existingIds = new Set(currentState.map(m => m.id).filter(Boolean));
+            const newMessages = messages.filter(m => !m.id || !existingIds.has(m.id));
+            return [...currentState, ...newMessages].sort(
+              (first, second) =>
+                Date.parse(String(first.timestamp)) - Date.parse(String(second.timestamp)),
+            );
+          });
+        }
+      } catch (error) {
+        console.error(`ChatService -> getChatHistory() ERROR: \n${error}`);
       }
-    } catch (error) {
-      console.error(`ChatService -> getChatHistory() ERROR: \n${error}`);
+    })();
+    chatHistoryRequestRef.current = request;
+    try {
+      await request;
+    } finally {
+      if (chatHistoryRequestRef.current === request) {
+        chatHistoryRequestRef.current = undefined;
+      }
     }
   };
 
-  const startChat = async () => {
-    try {
-      if (ws) {
-        ws?.shutdown();
-        setWebsocketService(null);
-        ws = null;
-      }
-
-      const { socketHostOverride } = clientConfig;
-
-      // Get a copy of the browser location without #fragments.
-      const location = window.location.origin + window.location.pathname;
-      const host = socketHostOverride || location;
-
-      ws = new WebsocketService(accessToken, '/ws', host);
-      ws.handleMessage = handleMessage;
-      ws.socketDisconnected = handleSocketDisconnect;
-      ws.socketConnected = handleSocketConnected;
-      setWebsocketService(ws);
-    } catch (error) {
-      console.error(`ChatService -> startChat() ERROR: \n${error}`);
-      sendEvent([AppStateEvent.ChatUserDisabled]);
-    }
-  };
+  getChatHistoryRef.current = getChatHistory;
 
   // Read the config and status on initial load from a JSON string that lives
   // in window. This is placed there server-side and allows for fast initial
@@ -511,24 +502,37 @@ export const ClientConfigStore: FC = () => {
   }, []);
 
   useEffect(() => {
-    if (clientConfig.chatDisabled) {
-      return;
+    if (clientConfig.chatDisabled || !accessToken || !hasLoadedConfig) {
+      setWebsocketService(null);
+      return undefined;
     }
 
-    if (!accessToken) {
-      return;
-    }
+    try {
+      // Get a copy of the browser location without #fragments.
+      const location = window.location.origin + window.location.pathname;
+      const host = clientConfig.socketHostOverride || location;
+      const websocket = new WebsocketService(accessToken, '/ws', host);
 
-    if (!hasLoadedConfig) {
-      return;
-    }
+      websocket.handleMessage = message => handleMessageRef.current?.(message);
+      websocket.socketConnected = () => {
+        getChatHistoryRef.current?.();
+      };
+      websocketRef.current = websocket;
+      setWebsocketService(websocket);
 
-    if (ws) {
-      return;
+      return () => {
+        websocket.shutdown();
+        if (websocketRef.current === websocket) {
+          websocketRef.current = null;
+          setWebsocketService(null);
+        }
+      };
+    } catch (error) {
+      console.error(`ChatService -> startChat() ERROR: \n${error}`);
+      sendEvent([AppStateEvent.ChatUserDisabled]);
+      return undefined;
     }
-
-    startChat();
-  }, [hasLoadedConfig, accessToken]);
+  }, [hasLoadedConfig, accessToken, clientConfig.chatDisabled, clientConfig.socketHostOverride]);
 
   useEffect(() => {
     if (!(window as any).configHydration) {
@@ -538,8 +542,7 @@ export const ClientConfigStore: FC = () => {
     if (!(window as any).statusHydration) {
       updateServerStatus();
     }
-    clearInterval(serverStatusRefreshPoll);
-    serverStatusRefreshPoll = setInterval(() => {
+    const serverStatusRefreshPoll = setInterval(() => {
       updateServerStatus();
     }, SERVER_STATUS_POLL_DURATION);
 
@@ -547,12 +550,6 @@ export const ClientConfigStore: FC = () => {
       clearInterval(serverStatusRefreshPoll);
     };
   }, []);
-
-  useEffect(() => {
-    if (accessToken) {
-      getChatHistory();
-    }
-  }, [accessToken]);
 
   // When a new viewer authenticates via the password gate, register them for chat
   useEffect(() => {
@@ -562,7 +559,7 @@ export const ClientConfigStore: FC = () => {
   }, [viewerAuthenticated]);
 
   useEffect(() => {
-    appStateService.onTransition(state => {
+    const subscription = appStateService.subscribe(state => {
       const metadata = mergeMeta(state.meta) as AppStateOptions;
 
       // console.debug('--- APP STATE: ', state.value);
@@ -570,6 +567,8 @@ export const ClientConfigStore: FC = () => {
 
       setAppState(metadata);
     });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   return null;

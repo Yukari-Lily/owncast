@@ -10,24 +10,24 @@ const FETCH_INTERVAL = 5 * 1000; // 5 sec
 export default function Logs() {
   const [logs, setLogs] = useState([]);
 
-  const getInfo = async () => {
-    try {
-      const result = await fetchData(LOGS_ALL);
-      setLogs(result);
-    } catch (error) {
-      console.log('==== error', error);
-    }
-  };
-
   useEffect(() => {
-    let getStatusIntervalId = null;
+    let mounted = true;
+    const getInfo = async () => {
+      try {
+        const result = await fetchData(LOGS_ALL);
+        if (mounted) {
+          setLogs(result);
+        }
+      } catch (error) {
+        console.log('==== error', error);
+      }
+    };
 
-    setInterval(getInfo, FETCH_INTERVAL);
     getInfo();
+    const getStatusIntervalId = setInterval(getInfo, FETCH_INTERVAL);
 
-    getStatusIntervalId = setInterval(getInfo, FETCH_INTERVAL);
-    // returned function will be called on component unmount
     return () => {
+      mounted = false;
       clearInterval(getStatusIntervalId);
     };
   }, []);

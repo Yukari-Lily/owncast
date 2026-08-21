@@ -134,7 +134,7 @@ func (self *emojis) Clone() emojiDef.Emojis {
 }
 
 var (
-	emojiMu           sync.Mutex
+	emojiMu           sync.RWMutex
 	emojiDefs         = newEmojis()
 	emojiHTML         = make(map[string]string)
 	emojiModTime      time.Time
@@ -183,32 +183,43 @@ func loadEmoji() {
 		return
 	}
 
-	if modTime.After(emojiModTime) {
-		emojiMu.Lock()
-		defer emojiMu.Unlock()
-
-		emojiHTML = make(map[string]string)
-
-		emojiList := data.GetEmojiList()
-		emojiArr := make([]emojiDef.Emoji, 0)
-
-		for i := 0; i < len(emojiList); i++ {
-			singleEmoji := emojiList[i]
-			singleEmoji.URL = emojiImageURL(singleEmoji.URL)
-
-			var buf bytes.Buffer
-			err := emojiHTMLTemplate.Execute(&buf, singleEmoji)
-			if err != nil {
-				return
-			}
-			emojiHTML[strings.ToLower(singleEmoji.Name)] = buf.String()
-
-			emoji := emojiDef.NewEmoji(singleEmoji.Name, nil, strings.ToLower(singleEmoji.Name))
-			emojiArr = append(emojiArr, emoji)
-		}
-
-		emojiDefs = newEmojis(emojiArr...)
+	emojiMu.RLock()
+	isCurrent := !modTime.After(emojiModTime)
+	emojiMu.RUnlock()
+	if isCurrent {
+		return
 	}
+
+	emojiMu.Lock()
+	defer emojiMu.Unlock()
+
+	// Another message may have rebuilt the definitions while this goroutine
+	// waited for the lock.
+	if !modTime.After(emojiModTime) {
+		return
+	}
+
+	nextEmojiHTML := make(map[string]string)
+	emojiList := data.GetEmojiList()
+	emojiArr := make([]emojiDef.Emoji, 0, len(emojiList))
+
+	for i := 0; i < len(emojiList); i++ {
+		singleEmoji := emojiList[i]
+		singleEmoji.URL = emojiImageURL(singleEmoji.URL)
+
+		var buf bytes.Buffer
+		if err := emojiHTMLTemplate.Execute(&buf, singleEmoji); err != nil {
+			return
+		}
+		nextEmojiHTML[strings.ToLower(singleEmoji.Name)] = buf.String()
+
+		emoji := emojiDef.NewEmoji(singleEmoji.Name, nil, strings.ToLower(singleEmoji.Name))
+		emojiArr = append(emojiArr, emoji)
+	}
+
+	emojiHTML = nextEmojiHTML
+	emojiDefs = newEmojis(emojiArr...)
+	emojiModTime = modTime
 }
 
 // RenderAndSanitizeMessageBody will turn markdown into HTML, sanitize raw user-supplied HTML and standardize
@@ -245,8 +256,8 @@ func RenderAndSanitize(raw string) string {
 func RenderMarkdown(raw string) string {
 	loadEmoji()
 
-	emojiMu.Lock()
-	defer emojiMu.Unlock()
+	emojiMu.RLock()
+	defer emojiMu.RUnlock()
 
 	// Render non-ASCII custom emoji shortcodes (e.g. :中文:) to <img> before
 	// markdown parsing, since goldmark-emoji cannot parse them.

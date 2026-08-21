@@ -1,10 +1,8 @@
 /* eslint-disable no-restricted-globals */
-self.addEventListener('activate', event => {
-  console.log('Owncast service worker activated', event);
-});
+const { removeApiAndAdminCacheEntries } = require('./cache-routes');
 
-self.addEventListener('install', event => {
-  console.log('installing Owncast service worker...', event);
+self.addEventListener('activate', event => {
+  event.waitUntil(removeApiAndAdminCacheEntries(self.caches));
 });
 
 self.addEventListener('push', event => {
@@ -21,5 +19,6 @@ self.addEventListener('push', event => {
 });
 
 self.addEventListener('notificationclick', event => {
-  clients.openWindow('/');
+  event.notification.close();
+  event.waitUntil(self.clients.openWindow('/'));
 });

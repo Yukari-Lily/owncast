@@ -11,19 +11,21 @@ export type VideoPosterProps = {
 };
 
 export const VideoPoster: FC<VideoPosterProps> = ({ online, initialSrc, src: base }) => {
-  let timer: ReturnType<typeof setInterval>;
   const [src, setSrc] = useState(initialSrc);
   const [duration, setDuration] = useState('0s');
 
   useEffect(() => {
-    clearInterval(timer);
-    timer = setInterval(() => {
-      if (duration === '0s') {
-        setDuration('3s');
-      }
+    if (!online) {
+      return undefined;
+    }
+
+    const timer = setInterval(() => {
+      setDuration(currentDuration => (currentDuration === '0s' ? '3s' : currentDuration));
       setSrc(`${base}?${Date.now()}`);
     }, REFRESH_INTERVAL);
-  }, []);
+
+    return () => clearInterval(timer);
+  }, [base, online]);
 
   return (
     <div className={styles.poster}>

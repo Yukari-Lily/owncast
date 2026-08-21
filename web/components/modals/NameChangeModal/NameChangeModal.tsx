@@ -56,8 +56,9 @@ export const NameChangeModal: FC<NameChangeModalProps> = ({ closeModal }) => {
       type: MessageType.NAME_CHANGE,
       newName,
     };
-    websocketService.send(nameChange);
-    closeModal();
+    if (websocketService.send(nameChange)) {
+      closeModal();
+    }
   };
 
   const handleColorChange = (color: string) => {
