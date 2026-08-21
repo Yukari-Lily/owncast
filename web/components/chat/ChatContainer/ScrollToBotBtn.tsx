@@ -14,9 +14,10 @@ const VerticalAlignBottomOutlined = dynamic(
 
 type Props = {
   onClick: () => void;
+  count?: number;
 };
 
-export const ScrollToBotBtn: FC<Props> = ({ onClick }) => (
+export const ScrollToBotBtn: FC<Props> = ({ onClick, count = 0 }) => (
   <div className={styles.toBottomWrap} id="scroll-to-chat-bottom">
     <Button
       type="default"
@@ -24,7 +25,7 @@ export const ScrollToBotBtn: FC<Props> = ({ onClick }) => (
       icon={<VerticalAlignBottomOutlined />}
       onClick={onClick}
     >
-      Go to last message
+      {count > 0 ? `${count} new message${count === 1 ? '' : 's'}` : 'Go to last message'}
     </Button>
   </div>
 );

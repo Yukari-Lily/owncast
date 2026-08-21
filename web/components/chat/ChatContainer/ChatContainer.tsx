@@ -22,6 +22,10 @@ import { ChatNameChangeMessage } from '../ChatNameChangeMessage/ChatNameChangeMe
 import { User } from '../../../interfaces/user.model';
 import { ComponentError } from '../../ui/ComponentError/ComponentError';
 import { attachSmoothWheelScroll } from '../../../utils/smoothWheelScroll';
+import {
+  backgroundEmojiPrefetchAllowed,
+  prefetchPriorityEmoji,
+} from '../ChatTextField/emojiPrefetch';
 
 export type ChatContainerProps = {
   messages: ChatMessage[];
@@ -74,6 +78,24 @@ function checkIsModerator(message: ChatMessage | ConnectedClientInfoEvent) {
   return u.isModerator;
 }
 
+// Collect the custom-emoji image URLs used across chat messages so they can be
+// warmed in the HTTP cache before rows mount in the pre-render buffer.
+function collectChatEmojiUrls(messages: ChatMessage[]): string[] {
+  const emojiImgSrcPattern = /<img\b[^>]*\bsrc=["'](\/img\/emoji\/[^"']+)["']/gi;
+  const urls = new Set<string>();
+  messages.forEach(message => {
+    const { body } = message;
+    if (!body) return;
+    let match = emojiImgSrcPattern.exec(body);
+    while (match !== null) {
+      const url = match[1];
+      if (url) urls.add(url);
+      match = emojiImgSrcPattern.exec(body);
+    }
+  });
+  return Array.from(urls);
+}
+
 export const ChatContainer: FC<ChatContainerProps> = ({
   messages,
   usernameToHighlight,
@@ -86,8 +108,14 @@ export const ChatContainer: FC<ChatContainerProps> = ({
   focusInput = true,
 }) => {
   const [showScrollToBottomButton, setShowScrollToBottomButton] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const chatContainerRef = useRef(null);
+  // Whether the scroller is currently at the bottom; used to decide if new
+  // messages should be counted as unread.
+  const isAtBottomRef = useRef(true);
+  // Tracks the last message count so we can count only newly added messages.
+  const prevMessageCountRef = useRef(messages.length);
   // Dispose handle for ease-out wheel scrolling on Virtuoso's scroller element.
   const detachSmoothScroll = useRef<(() => void) | null>(null);
 
@@ -101,6 +129,29 @@ export const ChatContainer: FC<ChatContainerProps> = ({
       detachSmoothScroll.current = attachSmoothWheelScroll(el, 'y');
     }
   }, []);
+
+  useEffect(() => {
+    const previousCount = prevMessageCountRef.current;
+    prevMessageCountRef.current = messages.length;
+    if (messages.length <= previousCount) return;
+
+    const newChatMessages = messages
+      .slice(previousCount)
+      .filter(
+        message => message.type === MessageType.CHAT || message.type === MessageType.CHAT_ACTION,
+      ).length;
+    if (newChatMessages > 0 && !isAtBottomRef.current) {
+      setUnreadCount(count => count + newChatMessages);
+    }
+  }, [messages]);
+
+  // Warm custom-emoji images ahead of the scroll position so they decode from
+  // cache when their row mounts instead of stalling paint mid-scroll.
+  useEffect(() => {
+    if (!backgroundEmojiPrefetchAllowed()) return;
+    const urls = collectChatEmojiUrls(messages);
+    if (urls.length > 0) prefetchPriorityEmoji(urls);
+  }, [messages]);
 
   useEffect(
     () =>
@@ -269,6 +320,11 @@ export const ChatContainer: FC<ChatContainerProps> = ({
           ref={chatContainerRef}
           scrollerRef={scrollerRef}
           data={messages}
+          computeItemKey={(_, message) => message.id}
+          // Pre-render rows above/below the viewport so fast wheel scrolling
+          // doesn't show blank space while new rows mount, including tall
+          // text-heavy messages.
+          increaseViewportBy={800}
           itemContent={(index, message) => getViewForMessage(index, message)}
           initialTopMostItemIndex={messages.length - 1}
           followOutput={atBottom =>
@@ -277,19 +333,23 @@ export const ChatContainer: FC<ChatContainerProps> = ({
           alignToBottom
           atBottomThreshold={4}
           atBottomStateChange={bottom => {
+            isAtBottomRef.current = bottom;
             setShowScrollToBottomButton(!bottom);
+            if (bottom) setUnreadCount(0);
           }}
         />
         {showScrollToBottomButton && (
           <ScrollToBotBtn
+            count={unreadCount}
             onClick={() => {
               scrollChatToBottom(chatContainerRef);
+              setUnreadCount(0);
             }}
           />
         )}
       </>
     ),
-    [messages, usernameToHighlight, chatUserId, isModerator, showScrollToBottomButton],
+    [messages, usernameToHighlight, chatUserId, isModerator, showScrollToBottomButton, unreadCount],
   );
 
   const defaultChatWidth: number = 320;

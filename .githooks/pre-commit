@@ -1,0 +1,34 @@
+#!/bin/sh
+# Pre-commit hook: format staged frontend files with Prettier.
+#
+# Resolution order:
+#   1. web/node_modules/.bin/prettier (local install)
+#   2. npx prettier@3.2.5 (downloads on demand)
+#   3. skip silently (no Node toolchain available, e.g. CI/Docker)
+#
+# Only staged files are formatted, then re-staged, so the commit contains
+# the formatted output. Files outside web/ are left untouched.
+
+set -e
+
+# Nothing to do without git.
+command -v git >/dev/null 2>&1 || exit 0
+
+STAGED="$(git diff --cached --name-only --diff-filter=ACMR -- \
+  'web/*.js' 'web/*.jsx' 'web/*.ts' 'web/*.tsx' 'web/*.css' 'web/*.scss' 'web/*.md')"
+[ -z "$STAGED" ] && exit 0
+
+PRETTIER=""
+if [ -x "web/node_modules/.bin/prettier" ]; then
+  PRETTIER="web/node_modules/.bin/prettier"
+elif command -v npx >/dev/null 2>&1; then
+  PRETTIER="npx --yes prettier@3.2.5"
+else
+  # No local toolchain; let the build/lint step surface formatting issues.
+  exit 0
+fi
+
+# Intentionally unquoted: each staged filename is a single word (repo paths
+# contain no spaces).
+$PRETTIER --write $STAGED
+git add $STAGED

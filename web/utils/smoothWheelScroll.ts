@@ -13,6 +13,10 @@ export function attachSmoothWheelScroll(
   // Local alias so scrollLeft/Top writes do not trip no-param-reassign.
   const node = element;
   let target = axis === 'x' ? node.scrollLeft : node.scrollTop;
+  // Internal float position. We advance this in fractional pixels and round
+  // when writing to the DOM: writing fractional scrollTop makes the browser
+  // paint text at sub-pixel offsets, which looks blurry while scrolling.
+  let pos = target;
   let raf = 0;
   // Position we last wrote; used to tell our setPos scroll events from
   // external ones (Virtuoso API, touch drag, etc.).
@@ -31,23 +35,34 @@ export function attachSmoothWheelScroll(
   const pageSize = () => (axis === 'x' ? node.clientWidth : node.clientHeight);
   const clamp = (v: number) => Math.max(0, Math.min(getMax(), v));
 
+  // Round to a device-pixel boundary. At fractional display scales (e.g. 175%
+  // => devicePixelRatio 1.75) an integer CSS pixel is still a fractional
+  // physical pixel, which forces re-rasterization every frame and causes jank
+  // when scrolling past heavy content.
+  const roundToDevicePixel = (v: number) => {
+    const dpr = window.devicePixelRatio || 1;
+    return Math.round(v * dpr) / dpr;
+  };
+
   const stop = () => {
     if (raf) {
       cancelAnimationFrame(raf);
       raf = 0;
     }
     lastWritten = null;
-    target = getPos();
+    pos = target = getPos();
   };
 
   const tick = () => {
-    const diff = target - getPos();
+    const diff = target - pos;
     if (Math.abs(diff) < 0.4) {
-      setPos(target);
+      setPos(roundToDevicePixel(target));
+      pos = target;
       raf = 0;
       return;
     }
-    setPos(getPos() + diff * 0.22);
+    pos += diff * 0.22;
+    setPos(roundToDevicePixel(pos));
     raf = requestAnimationFrame(tick);
   };
 

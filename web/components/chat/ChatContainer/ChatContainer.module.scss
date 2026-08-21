@@ -18,8 +18,12 @@
     box-shadow: 0 1px 2px 0 rgb(0 0 0 / 10%), 0 1px 5px 0 rgb(0 0 0 / 12%);
     display: flex;
     align-items: center;
+    justify-content: center;
+    // Keep the pill a constant size no matter the unread count, so it
+    // doesn't reflow or jump as the number changes.
+    width: 170px;
     opacity: 0;
-    animation: show 250ms forwards ease-in-out 500ms;
+    animation: show 250ms forwards ease-in-out;
     font-size: 12px;
     font-weight: 600;
   }

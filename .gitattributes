@@ -1,5 +1,9 @@
 # Recreate this file via
 # find static -type d -print0 | xargs -0 -I {} echo "{}/* linguist-vendored" | xclip -selection clipboard
+
+# Keep the pre-commit hook as LF on every platform; CRLF would break its shebang.
+.githooks/pre-commit text eol=lf
+
 static/* linguist-vendored
 docs/api/* linguist-documentation
 static/* linguist-vendored

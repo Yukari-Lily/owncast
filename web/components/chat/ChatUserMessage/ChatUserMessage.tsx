@@ -16,6 +16,13 @@ import { AuthedUserBadge } from '../ChatUserBadge/AuthedUserBadge';
 import { ModerationBadge } from '../ChatUserBadge/ModerationBadge';
 import { BotUserBadge } from '../ChatUserBadge/BotUserBadge';
 
+// The server renders custom emoji as <img class="emoji" src="/img/emoji/...">.
+// Ask the browser to decode them off the main thread so scrolling past an
+// emoji-heavy message doesn't stall paint.
+function withAsyncEmojiDecoding(body: string): string {
+  return body.replace(/<img\b(?![^>]*\bdecoding=)/gi, '<img decoding="async"');
+}
+
 // Lazy loaded components
 
 const ChatModerationActionMenu = dynamic(
@@ -108,7 +115,7 @@ export const ChatUserMessage: FC<ChatUserMessageProps> = ({
         <Tooltip title={formattedTimestamp} mouseEnterDelay={1}>
           <Interweave
             className={styles.message}
-            content={body}
+            content={withAsyncEmojiDecoding(body)}
             matchers={[
               new UrlMatcher('url', { customTLDs: ['online'] }),
               new ChatMessageHighlightMatcher('highlight', { highlightString }),
