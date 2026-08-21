@@ -86,10 +86,8 @@ export const ChatContainer: FC<ChatContainerProps> = ({
   focusInput = true,
 }) => {
   const [showScrollToBottomButton, setShowScrollToBottomButton] = useState(false);
-  const [isAtBottom, setIsAtBottom] = useState(false);
 
   const chatContainerRef = useRef(null);
-  const scrollToBottomDelay = useRef(null);
   // Dispose handle for ease-out wheel scrolling on Virtuoso's scroller element.
   const detachSmoothScroll = useRef<(() => void) | null>(null);
 
@@ -103,6 +101,18 @@ export const ChatContainer: FC<ChatContainerProps> = ({
       detachSmoothScroll.current = attachSmoothWheelScroll(el, 'y');
     }
   }, []);
+
+  useEffect(
+    () =>
+      // Clear the wheel-scroll listener when the component unmounts
+      () => {
+        if (detachSmoothScroll.current) {
+          detachSmoothScroll.current();
+          detachSmoothScroll.current = null;
+        }
+      },
+    [],
+  );
 
   const collapsedIndexes: boolean[] = [];
   let consecutiveTally: number = 1;
@@ -126,19 +136,6 @@ export const ChatContainer: FC<ChatContainerProps> = ({
     }
     return collapsedIndexes[index];
   }
-
-  useEffect(
-    () =>
-      // Clear the timer and wheel-scroll listener when the component unmounts
-      () => {
-        clearTimeout(scrollToBottomDelay.current);
-        if (detachSmoothScroll.current) {
-          detachSmoothScroll.current();
-          detachSmoothScroll.current = null;
-        }
-      },
-    [],
-  );
 
   const getFediverseMessage = (message: FediverseEvent) => <ChatSocialMessage message={message} />;
 
@@ -243,22 +240,13 @@ export const ChatContainer: FC<ChatContainerProps> = ({
   };
 
   const scrollChatToBottom = ref => {
-    clearTimeout(scrollToBottomDelay.current);
-    // Virtuoso's scrollTo / followOutput are external to the wheel ease.
-    // smoothWheelScroll yields on those scroll events (see lastWritten check)
-    // so it no longer fights and leaves the list mid-way.
-    scrollToBottomDelay.current = setTimeout(() => {
-      // Prefer scrollToIndex so Virtuoso lands on the last item even when
-      // content height is still settling after a new message.
-      const list = ref.current;
-      if (!list) return;
-      if (typeof list.scrollToIndex === 'function' && messages.length > 0) {
-        list.scrollToIndex({ index: messages.length - 1, align: 'end', behavior: 'auto' });
-      } else {
-        list.scrollTo({ top: Infinity, left: 0, behavior: 'auto' });
-      }
-      setIsAtBottom(true);
-    }, 150);
+    const list = ref.current;
+    if (!list) return;
+    if (typeof list.scrollToIndex === 'function' && messages.length > 0) {
+      list.scrollToIndex({ index: messages.length - 1, align: 'end', behavior: 'auto' });
+    } else {
+      list.scrollTo({ top: Infinity, left: 0, behavior: 'auto' });
+    }
     setShowScrollToBottomButton(false);
   };
 
@@ -283,25 +271,13 @@ export const ChatContainer: FC<ChatContainerProps> = ({
           data={messages}
           itemContent={(index, message) => getViewForMessage(index, message)}
           initialTopMostItemIndex={messages.length - 1}
-          followOutput={() => {
-            if (isAtBottom) {
-              setShowScrollToBottomButton(false);
-              scrollChatToBottom(chatContainerRef);
-              return 'smooth';
-            }
-
-            return false;
-          }}
+          followOutput={atBottom =>
+            atBottom || messages[messages.length - 1]?.user?.id === chatUserId ? 'auto' : false
+          }
           alignToBottom
-          atBottomThreshold={70}
+          atBottomThreshold={4}
           atBottomStateChange={bottom => {
-            setIsAtBottom(bottom);
-
-            if (bottom) {
-              setShowScrollToBottomButton(false);
-            } else {
-              setShowScrollToBottomButton(true);
-            }
+            setShowScrollToBottomButton(!bottom);
           }}
         />
         {showScrollToBottomButton && (
@@ -313,7 +289,7 @@ export const ChatContainer: FC<ChatContainerProps> = ({
         )}
       </>
     ),
-    [messages, usernameToHighlight, chatUserId, isModerator, showScrollToBottomButton, isAtBottom],
+    [messages, usernameToHighlight, chatUserId, isModerator, showScrollToBottomButton],
   );
 
   const defaultChatWidth: number = 320;
