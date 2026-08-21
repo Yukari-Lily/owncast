@@ -299,11 +299,8 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
       ensureCryptoSubtleAvailable();
 
       const host = document.createElement('div');
-      // Start hidden so prewarm / background creates do not flash content.
+      // Keep background-created hosts hidden until their tab is selected.
       host.hidden = true;
-      // Fade in after data:ready so the first paint is not an empty box.
-      host.style.opacity = '0';
-      host.style.transition = 'opacity 80ms ease-out';
       host.dataset.emojiTab = key;
       if (key !== ALL) {
         host.classList.add('emoji-single-category');
@@ -324,6 +321,8 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
       const isAll = key === ALL;
       const picker = createPicker({
         rootElement: host,
+        theme: 'dark',
+        animate: false,
         custom,
         initialCategory: 'custom',
         categories: isAll ? ['recents', 'custom'] : ['custom'],
@@ -431,8 +430,7 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
       });
       if (entry) {
         entry.host.hidden = false;
-        // Cached hosts that already finished data:ready stay at opacity 1. Fresh
-        // creates keep opacity 0 until their own reveal() so we still fade in.
+        // Cached hosts that already finished data:ready are shown immediately.
         if (
           entry.host.querySelector(
             '.picmo__emojiArea, .emojiArea, .picmo__picker:not(.picmo__skeleton)',

@@ -11,17 +11,20 @@
   .inputWrap {
     position: relative;
     display: flex;
-    color: var(--theme-color-components-form-field-text);
-    background-color: var(--theme-color-palette-3);
-    border-radius: var(--theme-rounded-corners);
+    color: var(--oc-text-primary);
+    background-color: var(--oc-surface-elevated);
+    border: 1px solid var(--oc-border-subtle);
+    border-radius: var(--oc-control-radius);
     bottom: 0;
     width: 100%;
-    padding: 0.3rem;
-    transition: box-shadow 90ms ease-in-out;
+    padding: 0.35rem;
+    transition:
+      border-color 150ms ease,
+      box-shadow 150ms ease;
 
     &:focus-within {
-      background-color: var(--theme-color-components-form-field-background);
-      box-shadow: inset 0 0 2px 2px var(--theme-color-palette-3);
+      border-color: var(--theme-color-action);
+      box-shadow: 0 0 0 2px var(--oc-accent-soft);
     }
 
     // Size of custom emoji.
@@ -38,20 +41,30 @@
   }
 
   div[role='textbox'] {
-    font-size: 13px;
+    font-size: var(--chat-message-text-size);
+    line-height: 1.5;
     font-weight: 400;
     padding: 0.3rem;
     background-color: inherit;
     border-color: var(--theme-color-components-form-field-border);
     box-shadow: 0;
+    color: inherit;
     transition: box-shadow 50ms ease-in-out;
-    max-height: 40px; // 2 lines of text
-    min-height: 30px;
+    max-height: calc(var(--chat-message-text-size) * 1.5 * 5 + 0.6rem); // 5 lines + padding
+    min-height: calc(var(--chat-message-text-size) * 1.5 + 0.6rem); // one line + padding
     cursor: text;
     overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+      width: 0;
+      height: 0;
+    }
 
     &:focus {
-      outline: 1px solid var(--color-owncast-gray-500) !important;
+      outline: none !important;
     }
 
     & > p {
@@ -63,20 +76,34 @@
   :empty::before {
     content: attr(placeholder);
     display: block;
-    color: #aaa;
+    color: var(--oc-text-muted);
   }
 }
 
 .emojiButton {
   border: none;
-  background: none;
+  color: var(--oc-text-secondary);
+  background: transparent;
   cursor: pointer;
   padding: 0 0.25rem;
+  border-radius: 6px;
+
+  &:focus-visible {
+    outline: 1px solid var(--oc-accent);
+    outline-offset: 2px;
+  }
 }
 
 .sendButton {
   border: none;
-  background: none;
+  color: var(--oc-text-secondary);
+  background: transparent;
   cursor: pointer;
   padding: 0 1rem;
+  border-radius: 6px;
+
+  &:focus-visible {
+    outline: 1px solid var(--oc-accent);
+    outline-offset: 2px;
+  }
 }

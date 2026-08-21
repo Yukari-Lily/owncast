@@ -3,7 +3,6 @@ import classnames from 'classnames';
 
 import { useRecoilState, useRecoilValue } from 'recoil';
 import { FC, useState } from 'react';
-import { useHotkeys } from 'react-hotkeys-hook';
 import dynamic from 'next/dynamic';
 import { ErrorBoundary } from 'react-error-boundary';
 import {
@@ -127,16 +126,6 @@ export const UserDropdown: FC<UserDropdownProps> = ({
     (chatState === ChatState.HIDDEN ||
       chatState === ChatState.VISIBLE ||
       chatState === ChatState.POPPED_OUT);
-
-  // Register keyboard shortcut for the space bar to toggle playback
-  useHotkeys(
-    'c',
-    toggleChatVisibility,
-    {
-      enableOnContentEditable: false,
-    },
-    [chatState === ChatState.VISIBLE],
-  );
 
   const currentUser = useRecoilValue(currentUserAtom);
   if (!currentUser) {

@@ -1,6 +1,5 @@
 import React, { FC, useContext, useEffect } from 'react';
 import { useRecoilState, useRecoilValue } from 'recoil';
-import { useHotkeys } from 'react-hotkeys-hook';
 import classNames from 'classnames';
 import { ErrorBoundary } from 'react-error-boundary';
 import { VideoJS } from '../VideoJS/VideoJS';
@@ -16,7 +15,6 @@ import { VideoSettingsServiceContext } from '../../../services/video-settings-se
 import { ComponentError } from '../../ui/ComponentError/ComponentError';
 
 const PLAYER_VOLUME = 'owncast_volume';
-const LATENCY_COMPENSATION_ENABLED = 'latencyCompensatorEnabled';
 
 const ping = new ViewerPing();
 let playbackMetrics = null;
@@ -55,30 +53,6 @@ export const OwncastPlayer: FC<OwncastPlayerProps> = ({
     setLocalStorage(PLAYER_VOLUME, playerRef.current.muted() ? 0 : playerRef.current.volume());
   };
 
-  const togglePlayback = () => {
-    if (playerRef.current.paused()) {
-      playerRef.current.play();
-    } else {
-      playerRef.current.pause();
-    }
-  };
-
-  const toggleMute = () => {
-    if (playerRef.current.muted() || playerRef.current.volume() === 0) {
-      playerRef.current.volume(0.7);
-    } else {
-      playerRef.current.volume(0);
-    }
-  };
-
-  const toggleFullScreen = () => {
-    if (playerRef.current.isFullscreen()) {
-      playerRef.current.exitFullscreen();
-    } else {
-      playerRef.current.requestFullscreen();
-    }
-  };
-
   const startLatencyCompensator = () => {
     if (latencyCompensator) {
       latencyCompensator.stop();
@@ -89,7 +63,6 @@ export const OwncastPlayer: FC<OwncastPlayerProps> = ({
     latencyCompensator = new LatencyCompensator(playerRef.current);
     latencyCompensator.setClockSkew(clockSkew);
     latencyCompensator.enable();
-    setLocalStorage(LATENCY_COMPENSATION_ENABLED, true);
   };
 
   const stopLatencyCompensator = () => {
@@ -98,7 +71,6 @@ export const OwncastPlayer: FC<OwncastPlayerProps> = ({
     }
     latencyCompensator = null;
     latencyCompensatorEnabled = false;
-    setLocalStorage(LATENCY_COMPENSATION_ENABLED, false);
   };
 
   // Toggle minimized latency mode. Return the new state.
@@ -119,22 +91,18 @@ export const OwncastPlayer: FC<OwncastPlayerProps> = ({
       return;
     }
 
-    const latencyCompensatorEnabledSaved = getLocalStorage(LATENCY_COMPENSATION_ENABLED);
-
-    if (latencyCompensatorEnabledSaved === 'true' && tech && tech.vhs) {
-      startLatencyCompensator();
-    } else {
-      stopLatencyCompensator();
-    }
+    startLatencyCompensator();
   };
 
   const createSettings = async (player, videojs) => {
     const videoQualities = await VideoSettingsService.getVideoQualities();
+    setupLatencyCompensator(player);
     const menuButton = createVideoSettingsMenuButton(
       player,
       videojs,
       videoQualities,
       toggleLatencyCompensator,
+      latencyCompensatorEnabled,
     );
     player.controlBar.addChild(
       menuButton,
@@ -142,7 +110,6 @@ export const OwncastPlayer: FC<OwncastPlayerProps> = ({
       // eslint-disable-next-line no-underscore-dangle
       player.controlBar.children_.length - 2,
     );
-    setupLatencyCompensator(player);
   };
 
   const setupAirplay = (player, videojs) => {
@@ -171,29 +138,6 @@ export const OwncastPlayer: FC<OwncastPlayerProps> = ({
       concreteButtonInstance.addClass('vjs-airplay');
     }
   };
-
-  // Register keyboard shortcut for the space bar to toggle playback
-  useHotkeys('space', e => {
-    e.preventDefault();
-    togglePlayback();
-  });
-
-  // Register keyboard shortcut for f to toggle full screen
-  useHotkeys('f', toggleFullScreen, {
-    enableOnContentEditable: false,
-  });
-
-  // Register keyboard shortcut for the "m" key to toggle mute
-  useHotkeys('m', toggleMute, {
-    enableOnContentEditable: false,
-  });
-
-  useHotkeys('0', () => playerRef.current.volume(playerRef.current.volume() + 0.1), {
-    enableOnContentEditable: false,
-  });
-  useHotkeys('9', () => playerRef.current.volume(playerRef.current.volume() - 0.1), {
-    enableOnContentEditable: false,
-  });
 
   const videoJsOptions = {
     autoplay: false,

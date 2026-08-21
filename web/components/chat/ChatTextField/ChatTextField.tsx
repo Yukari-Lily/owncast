@@ -123,6 +123,25 @@ const getTextContent = node => {
   return text;
 };
 
+const isTextEntryTarget = (target: EventTarget | null) => {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(
+    target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]'),
+  );
+};
+
+const isInteractiveTarget = (target: EventTarget | null) => {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(
+    target.closest(
+      'button, a, [role="button"], [role="link"], [role="menuitem"], [role="option"], [role="tab"]',
+    ),
+  );
+};
+
+const isCharacterKey = (key: string) => key.length === 1 && key !== ' ';
+const isFunctionKey = (key: string) => /^F(?:[1-9]|1[0-2])$/.test(key);
+
 export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, focusInput }) => {
   const [characterCount, setCharacterCount] = useState(defaultText?.length);
   const websocketService = useRecoilValue<WebsocketService>(websocketServiceAtom);
@@ -179,9 +198,81 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
     contentEditable.innerHTML = '';
   };
 
-  const insertTextAtEnd = (textToInsert: string) => {
-    contentEditable.innerHTML += textToInsert;
+  const focusContentEditableAtEnd = (defer = true) => {
+    if (!contentEditable) return;
+
+    const focus = () => {
+      contentEditable.focus({ preventScroll: true });
+      const selection = window.getSelection();
+      if (!selection) return;
+
+      const range = document.createRange();
+      range.selectNodeContents(contentEditable);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    };
+
+    if (defer) window.requestAnimationFrame(focus);
+    else focus();
   };
+
+  const insertTextAtEnd = (textToInsert: string) => {
+    if (!contentEditable) return;
+
+    contentEditable.appendChild(document.createTextNode(textToInsert));
+    setCharacterCount(getCharacterCount());
+    setEmojiOpen(false);
+    focusContentEditableAtEnd();
+  };
+
+  const insertHtmlAtEnd = (htmlToInsert: string) => {
+    if (!contentEditable) return;
+
+    contentEditable.insertAdjacentHTML('beforeend', htmlToInsert);
+    setCharacterCount(getCharacterCount());
+    setEmojiOpen(false);
+    focusContentEditableAtEnd();
+  };
+
+  useEffect(() => {
+    if (!enabled || !contentEditable) return undefined;
+
+    const handleDocumentKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey
+      ) {
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        if (isTextEntryTarget(event.target) || isInteractiveTarget(event.target)) return;
+        event.preventDefault();
+        focusContentEditableAtEnd();
+        return;
+      }
+
+      if (isTextEntryTarget(event.target) || isFunctionKey(event.key)) return;
+
+      focusContentEditableAtEnd(false);
+      if (!isCharacterKey(event.key)) {
+        event.preventDefault();
+        return;
+      }
+
+      insertTextAtEnd(event.key);
+      event.preventDefault();
+    };
+
+    document.addEventListener('keydown', handleDocumentKeyDown, true);
+    return () => {
+      document.removeEventListener('keydown', handleDocumentKeyDown, true);
+    };
+  }, [contentEditable, enabled]);
 
   // Native emoji
   const onEmojiSelect = (emoji: string) => {
@@ -191,11 +282,16 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
   // Custom emoji images
   const onCustomEmojiSelect = (name: string, emoji: string) => {
     const html = `<img src="${emoji}" alt=":${name}:" title=":${name}:" class="emoji" />`;
-    insertTextAtEnd(html);
+    insertHtmlAtEnd(html);
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) {
+    if (
+      e.key === 'Enter' &&
+      !e.nativeEvent.isComposing &&
+      e.keyCode !== 229 &&
+      !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)
+    ) {
       e.preventDefault();
       sendMessage();
     }
@@ -307,7 +403,7 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
         <ContentEditable
           id="chat-input-content-editable"
           html={defaultText || ''}
-          placeholder={enabled ? 'Send a message to chat' : 'Chat is disabled'}
+          placeholder={enabled ? '' : 'Chat is disabled'}
           disabled={!enabled}
           onKeyDown={onKeyDown}
           onContentChange={handleChange}
@@ -326,6 +422,12 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
               destroyTooltipOnHide={false}
               open={emojiOpen}
               onOpenChange={setEmojiOpen}
+              // A tall picker should stay above the composer instead of being
+              // shifted down over the trigger by antd's vertical adjustment.
+              autoAdjustOverflow={{ adjustX: 1, adjustY: 0 }}
+              // The popup is portaled to body. Fixed positioning prevents its
+              // bounds from creating page scrollbars.
+              overlayStyle={{ position: 'fixed' }}
               content={
                 <EmojiPicker
                   open={emojiOpen}

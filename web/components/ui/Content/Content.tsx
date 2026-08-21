@@ -223,7 +223,11 @@ export const Content: FC = () => {
     }
     const vv = window.visualViewport;
     const update = () => {
-      document.documentElement.style.setProperty('--app-vh', `${vv.height}px`);
+      // Android Chrome can move the visual viewport while the IME is open.
+      // Include its offset so the flex layout reaches the actual keyboard edge.
+      const visualBottom = vv.height + Math.max(0, vv.offsetTop);
+      const visualHeight = Math.min(window.innerHeight, visualBottom);
+      document.documentElement.style.setProperty('--app-vh', `${visualHeight}px`);
     };
     update();
     vv.addEventListener('resize', update);

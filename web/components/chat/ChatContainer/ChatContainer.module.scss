@@ -6,7 +6,10 @@
   display: flex;
   justify-content: center;
   position: absolute;
-  bottom: 75px;
+  // Track the visual viewport: on mobile --app-vh can be shorter than 100vh
+  // when the browser bar/keyboard covers the bottom, so offset by the gap to
+  // keep the button above the input instead of behind the browser chrome.
+  bottom: calc(75px + (100vh - var(--app-vh, 100vh)));
   color: var(--theme-color-components-chat-background);
 
   button {
@@ -29,10 +32,14 @@
   background-color: var(--theme-color-components-chat-background);
   height: 100%;
   font-size: var(--chat-message-text-size);
+
+  @include screen(desktop) {
+    border-left: 1px solid var(--oc-border-subtle);
+  }
 }
 
 .resizeHandle {
-  background: linear-gradient(45deg, transparent 0px,transparent 4px, var(--color-owncast-palette-6) 4px, var(--color-owncast-palette-6) 5px, transparent 5px, transparent 9px, var(--color-owncast-palette-6) 9px, var(--color-owncast-palette-6) 10px, transparent 10px, transparent 14px, var(--color-owncast-palette-6) 14px, var(--color-owncast-palette-6) 15px, transparent 15px);
+  background: linear-gradient(45deg, transparent 0, transparent 4px, var(--color-owncast-palette-6) 4px, var(--color-owncast-palette-6) 5px, transparent 5px, transparent 9px, var(--color-owncast-palette-6) 9px, var(--color-owncast-palette-6) 10px, transparent 10px, transparent 14px, var(--color-owncast-palette-6) 14px, var(--color-owncast-palette-6) 15px, transparent 15px);
   position: absolute;
   bottom: 0;
   width: 30px;
@@ -57,7 +64,7 @@
 }
 
 .chatTextField {
-  border-top: 1px solid lightgray;
+  border-top: 1px solid var(--oc-border-subtle);
 }
 
 @keyframes show {

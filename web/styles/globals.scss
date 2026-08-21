@@ -18,13 +18,9 @@
   --chat-notification-icon-padding: 6px;
   --chat-message-padding: 10px;
   --chat-text-highlight-border-radius: 3px;
-	--player-container-height: 90vh;
-	--status-bar-height: 2rem;
-	--footer-padding-x: 1rem;
-}
-
-::selection {
-  background-color: var(--theme-color-palette-12);
+  --player-container-height: 90vh;
+  --status-bar-height: 2rem;
+  --footer-padding-x: 1rem;
 }
 
 html {
@@ -137,6 +133,27 @@ body {
   overflow: hidden;
 }
 
+.emoji-popover .ant-popover-inner {
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--oc-border-subtle);
+  border-radius: var(--oc-control-radius);
+  background: var(--oc-surface-elevated);
+  box-shadow: 0 16px 36px rgb(0 0 0 / 35%);
+}
+
+.emoji-popover .ant-popover-arrow::before {
+  background: var(--oc-surface-elevated);
+}
+
+.emoji-popover.ant-zoom-big-enter,
+.emoji-popover.ant-zoom-big-appear,
+.emoji-popover.ant-zoom-big-leave {
+  transform-origin: 100% 100%;
+  animation-duration: var(--oc-motion-picker-duration);
+  animation-timing-function: var(--oc-motion-standard);
+}
+
 // Root width is fit-content (picmo's --picker-width). overflow:hidden keeps a
 // long tab strip from visually spilling; the strip itself scrolls via
 // width:0 + min-width:100% (see EmojiPicker inline styles).
@@ -144,6 +161,55 @@ body {
   min-width: 0;
   overflow: hidden;
   box-sizing: border-box;
+  color: var(--oc-text-primary);
+  background: var(--oc-surface-elevated);
+  --accent-color: var(--oc-accent);
+}
+
+.emoji-popover .picmo__picker {
+  --accent-color: var(--oc-accent);
+  --background-color: var(--oc-surface-elevated);
+  --border-color: var(--oc-border-strong);
+  --category-name-background-color: var(--oc-surface-elevated);
+  --category-name-button-color: var(--oc-text-secondary);
+  --category-name-text-color: var(--oc-text-secondary);
+  --category-tab-active-background-color: var(--oc-accent-soft);
+  --category-tab-active-color: var(--oc-text-primary);
+  --category-tab-color: var(--oc-text-secondary);
+  --category-tab-highlight-background-color: rgb(255 255 255 / 8%);
+  --focus-indicator-background-color: var(--oc-accent-soft);
+  --focus-indicator-color: var(--oc-text-primary);
+  --hover-background-color: rgb(255 255 255 / 8%);
+  --placeholder-background-color: var(--oc-surface-chat);
+  --secondary-background-color: var(--oc-surface-chat);
+  --secondary-text-color: var(--oc-text-muted);
+  --text-color: var(--oc-text-primary);
+  --variant-popup-background-color: var(--oc-surface-header);
+  background: var(--oc-surface-elevated);
+}
+
+.emoji-popover .picmo__emojiButton,
+.emoji-popover .picmo__emojiButton:hover,
+.emoji-popover .picmo__emojiButton:focus,
+.emoji-popover .picmo__emojiButton:active {
+  background: transparent !important;
+  box-shadow: none !important;
+  transition: transform 140ms var(--oc-motion-standard);
+}
+
+.emoji-popover .picmo__emojiButton:hover,
+.emoji-popover .picmo__emojiButton:focus-visible {
+  transform: scale(1.08);
+}
+
+.emoji-popover .picmo__emojiButton:focus-visible {
+  outline: 1px solid var(--theme-color-action);
+  outline-offset: 2px;
+}
+
+.emoji-popover .emoji-tabs {
+  border-bottom: 1px solid var(--oc-border-subtle);
+  background: var(--oc-surface-header);
 }
 
 // picmo always paints a shimmer skeleton on createPicker before data:ready.
@@ -172,25 +238,31 @@ body {
   ) !important;
 }
 
+// PicMo gives the content wrapper its own fixed height. Keep it in sync with
+// the capped emoji area so high zoom does not leave an empty strip below it.
+.emoji-popover .picmo__picker {
+  --content-height: min(var(--emoji-area-height), min(60vh, 380px)) !important;
+  --content-height: min(var(--emoji-area-height), min(60dvh, 380px)) !important;
+}
+
 // Baked-in emoji picker theme: big emojis.
 // picmo's search box, category tabs, and extra categories are already
 // disabled in EmojiPicker.tsx (showSearch/showCategoryTabs/categories), so
 // no CSS is needed to hide them.
-// Big 5rem emojis, 5 columns, 4 visible rows by default.
+// Fixed-size 64px emojis, 5 columns, 4 visible rows by default.
 .picmo__picker {
   --emojis-per-row: 5 !important;
   --row-count: 4 !important;
 }
 .picmo__picker.picmo__picker {
-  --emoji-size: 5rem !important;
+  --emoji-size: 64px !important;
   --emoji-size-multiplier: 1.25 !important;
 }
-// On narrow views the big 5rem emojis make 5 columns (~544px) overflow the
-// viewport and clip. Drop to 3 columns (~322px) so the picker fits.
-// Higher specificity than the 5-col rule above so this wins on narrow views.
+// Keep five columns at every width. On narrow views, shrink the emoji cells so
+// PicMo's calculated picker width stays within the viewport.
 @include screen(tablet) {
   .emoji-popover .picmo__picker {
-    --emojis-per-row: 3 !important;
+    --emoji-size: min(64px, calc((100vw - 4.5rem) / 6.25)) !important;
   }
 }
 
@@ -205,7 +277,10 @@ body {
 // Subtle hover for inactive emoji category tabs (the active tab keeps its accent
 // border). Semi-transparent gray works on both light and dark themes.
 .emoji-tab {
-  transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    transform 0.12s ease;
 }
 .emoji-tab:not(.emoji-tab-active):hover {
   background: rgba(127, 127, 127, 0.15);
@@ -233,6 +308,10 @@ body {
 
 .emoji-popover .picmo__emojiArea,
 .emoji-popover .emojiArea {
+  // Keep the popup above the composer at high zoom. The grid remains
+  // scrollable when the available viewport is smaller than the full picker.
+  max-height: min(60vh, 380px);
+  max-height: min(60dvh, 380px);
   overscroll-behavior-y: contain;
 }
 

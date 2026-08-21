@@ -4,6 +4,7 @@ export function createVideoSettingsMenuButton(
   videojs,
   qualities,
   latencyItemPressed: () => boolean,
+  latencyInitiallyEnabled: boolean,
 ): any {
   const VjsMenuItem = videojs.getComponent('MenuItem');
   const MenuItem = videojs.getComponent('MenuItem');
@@ -26,6 +27,7 @@ export function createVideoSettingsMenuButton(
     selectable: true,
     label: 'minimize latency (experimental)',
   });
+  lowLatencyItem.selected(latencyInitiallyEnabled);
   lowLatencyItem.on('click', () => {
     const enabled: boolean = latencyItemPressed();
     lowLatencyItem.selected(enabled);

@@ -5,9 +5,11 @@
   flex-direction: row;
   overflow: hidden;
   height: 100%;
+  background-color: var(--oc-surface-page);
 
   @include screen(tablet) {
     flex-direction: column;
+
     // Dynamic viewport height so the pinned chat input isn't hidden behind
     // the mobile browser's address bar. --app-vh (set from the Visual
     // Viewport API in Content.tsx) also tracks the soft keyboard so the

@@ -8,6 +8,26 @@
  */
 
 :root {
+  /* User-facing dark theme tokens. Keep these separate from the generated
+     Owncast palette so admin themes and runtime appearance overrides remain
+     compatible. */
+  --oc-surface-page: #1b1b1f;
+  --oc-surface-header: #101014;
+  --oc-surface-chat: #101114;
+  --oc-surface-elevated: #202027;
+  --oc-border-subtle: rgba(255, 255, 255, 0.08);
+  --oc-border-strong: rgba(255, 255, 255, 0.16);
+  --oc-text-primary: #ececf2;
+  --oc-text-secondary: #c9c9d1;
+  --oc-text-muted: #8e8e99;
+  --oc-text-on-accent: #fff;
+  --oc-accent: #d246d2;
+  --oc-accent-hover: #e178e1;
+  --oc-accent-soft: rgba(210, 70, 210, 0.16);
+  --oc-control-radius: 10px;
+  --oc-motion-picker-duration: 180ms;
+  --oc-motion-standard: cubic-bezier(0.22, 0.61, 0.36, 1);
+
   --link-color: var(--theme-color-action);
   --link-hover-color: var(--theme-color-action-hover);
   --modal-header-bg: var(--theme-color-components-modal-header-background);
