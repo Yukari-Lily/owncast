@@ -45,17 +45,19 @@
   }
 
   div[role='textbox'] {
-    font-size: var(--chat-message-text-size);
+    font-size: var(--chat-input-text-size);
     line-height: 1.5;
     font-weight: 400;
-    padding: 0.3rem;
+    // Extra horizontal padding balances the visual side margins against
+    // top/bottom, which include half-leading from the 1.5 line-height.
+    padding: 0.3rem 0.6rem;
     background-color: inherit;
     border-color: var(--theme-color-components-form-field-border);
     box-shadow: 0;
     color: inherit;
     transition: box-shadow 50ms ease-in-out;
-    max-height: calc(var(--chat-message-text-size) * 1.5 * 5 + 0.6rem); // 5 lines + padding
-    min-height: calc(var(--chat-message-text-size) * 1.5 + 0.6rem); // one line + padding
+    max-height: calc(var(--chat-input-text-size) * 1.5 * 5 + 0.6rem); // 5 lines + padding
+    min-height: calc(var(--chat-input-text-size) * 1.5 + 0.6rem); // one line + padding
     cursor: text;
     overflow-x: auto;
     scrollbar-width: none;

@@ -435,7 +435,7 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
   }, [emojiOpen, getCustomEmoji]);
 
   // Publish the real composer height to the chat panel so the unread pill is
-  // always positioned right above it. The CSS static value (60px) covers the
+  // always positioned right above it. The CSS static value (55px) covers the
   // one-line case; when the input grows to its 5-line cap the pill must move
   // with it. Observing #chat-input itself, which nothing here ever resizes
   // from below, avoids a feedback loop.

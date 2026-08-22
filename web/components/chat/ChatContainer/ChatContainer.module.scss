@@ -9,7 +9,7 @@
   // Track the visual viewport: on mobile --app-vh can be shorter than 100vh
   // when the browser bar/keyboard covers the bottom, so offset by the gap to
   // keep the button above the input instead of behind the browser chrome.
-  bottom: calc(var(--oc-chat-composer-height, 60px) + (100vh - var(--app-vh, 100vh)));
+  bottom: calc(var(--oc-chat-composer-height, 55px) + (100vh - var(--app-vh, 100vh)));
   color: var(--theme-color-components-chat-background);
 
   button {
@@ -33,7 +33,7 @@
   // Height of the composer (input strip). Keep in sync with the sized
   // elements in ChatTextField.module.scss (root/inputWrap/textbox padding and
   // the textbox min-height), so the unread pill below stays above the input.
-  --oc-chat-composer-height: 60px;
+  --oc-chat-composer-height: 55px;
 
   position: relative;
   flex: 0 0 auto;

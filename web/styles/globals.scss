@@ -15,6 +15,7 @@
 
   // chat modules
   --chat-message-text-size: 1.15rem;
+  --chat-input-text-size: calc(var(--chat-message-text-size) * 0.8);
   --chat-notification-icon-padding: 6px;
   --chat-message-padding: 10px;
   --chat-text-highlight-border-radius: 3px;
