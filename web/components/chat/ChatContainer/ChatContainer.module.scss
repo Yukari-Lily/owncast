@@ -9,7 +9,7 @@
   // Track the visual viewport: on mobile --app-vh can be shorter than 100vh
   // when the browser bar/keyboard covers the bottom, so offset by the gap to
   // keep the button above the input instead of behind the browser chrome.
-  bottom: calc(75px + (100vh - var(--app-vh, 100vh)));
+  bottom: calc(var(--oc-chat-composer-height, 54px) + (100vh - var(--app-vh, 100vh)));
   color: var(--theme-color-components-chat-background);
 
   button {
@@ -30,6 +30,12 @@
 }
 
 .chatContainer {
+  // Height of the composer (input strip). Keep in sync with the sized
+  // elements in ChatTextField.module.scss (root/inputWrap/textbox padding and
+  // the textbox min-height), so the unread pill below stays above the input.
+  --oc-chat-composer-height: 60px;
+
+  position: relative;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
@@ -43,12 +49,14 @@
 }
 
 .resizeHandle {
-  background: linear-gradient(45deg, transparent 0, transparent 4px, var(--color-owncast-palette-6) 4px, var(--color-owncast-palette-6) 5px, transparent 5px, transparent 9px, var(--color-owncast-palette-6) 9px, var(--color-owncast-palette-6) 10px, transparent 10px, transparent 14px, var(--color-owncast-palette-6) 14px, var(--color-owncast-palette-6) 15px, transparent 15px);
+  // Invisible full-height drag strip on the left edge of the chat panel.
   position: absolute;
+  left: 0;
+  top: 0;
   bottom: 0;
-  width: 30px;
-  height: 30px;
-  cursor: col-resize;
+  width: 6px;
+  cursor: ew-resize;
+  z-index: 2;
 }
 
 .virtuoso {
@@ -69,6 +77,7 @@
 
 .chatTextField {
   border-top: 1px solid var(--oc-border-subtle);
+  box-shadow: 0 -6px 12px -8px rgb(0 0 0 / 40%);
 }
 
 @keyframes show {

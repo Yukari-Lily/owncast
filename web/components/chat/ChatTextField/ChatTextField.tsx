@@ -149,6 +149,9 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
   const [contentEditable, setContentEditable] = useState(null);
   const [customEmoji, setCustomEmoji] = useState<CustomEmoji[]>([]);
   const [emojiPickerReady, setEmojiPickerReady] = useState(false);
+  // The root of the composer strip; its height is published to the chat panel
+  // so the unread pill tracks the input box at any line count.
+  const rootRef = useRef<HTMLDivElement>(null);
   const emojiEtagRef = useRef<string>();
   const emojiRequestRef = useRef<Promise<void>>();
   const emojiAbortRef = useRef<AbortController>();
@@ -431,8 +434,28 @@ export const ChatTextField: FC<ChatTextFieldProps> = ({ defaultText, enabled, fo
     if (emojiOpen) getCustomEmoji();
   }, [emojiOpen, getCustomEmoji]);
 
+  // Publish the real composer height to the chat panel so the unread pill is
+  // always positioned right above it. The CSS static value (60px) covers the
+  // one-line case; when the input grows to its 5-line cap the pill must move
+  // with it. Observing #chat-input itself, which nothing here ever resizes
+  // from below, avoids a feedback loop.
+  useEffect(() => {
+    const host = rootRef.current;
+    if (!host || typeof ResizeObserver === 'undefined') return undefined;
+
+    const publish = () => {
+      const container = document.getElementById('chat-container');
+      if (!container) return;
+      container.style.setProperty('--oc-chat-composer-height', `${Math.ceil(host.offsetHeight)}px`);
+    };
+    const observer = new ResizeObserver(publish);
+    observer.observe(host);
+    publish();
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <div id="chat-input" className={styles.root}>
+    <div id="chat-input" className={styles.root} ref={rootRef}>
       <div
         className={classNames(
           styles.inputWrap,

@@ -5,8 +5,12 @@
   display: flex;
   bottom: 0;
   width: 100%;
-  padding: 0.6em;
-  background-color: var(--theme-color-components-chat-background);
+  padding: 0.4em;
+  background-color: color-mix(
+    in srgb,
+    var(--theme-color-components-chat-background) 92%,
+    var(--oc-surface-elevated)
+  );
 
   .inputWrap {
     position: relative;
@@ -14,17 +18,17 @@
     color: var(--oc-text-primary);
     background-color: var(--oc-surface-elevated);
     border: 1px solid var(--oc-border-subtle);
-    border-radius: var(--oc-control-radius);
+    border-radius: 10px;
     bottom: 0;
     width: 100%;
-    padding: 0.35rem;
+    padding: 0.2rem;
     transition:
       border-color 150ms ease,
       box-shadow 150ms ease;
 
     &:focus-within {
       border-color: var(--theme-color-action);
-      box-shadow: 0 0 0 2px var(--oc-accent-soft);
+      box-shadow: 0 0 0 1px var(--oc-accent-soft), 0 2px 10px 0 var(--oc-accent-soft);
     }
 
     // Size of custom emoji.
@@ -85,8 +89,12 @@
   color: var(--oc-text-secondary);
   background: transparent;
   cursor: pointer;
-  padding: 0 0.25rem;
+  padding: 0 0.15rem;
   border-radius: 6px;
+
+  &:hover {
+    color: var(--oc-accent);
+  }
 
   &:focus-visible {
     outline: 1px solid var(--oc-accent);
@@ -99,8 +107,12 @@
   color: var(--oc-text-secondary);
   background: transparent;
   cursor: pointer;
-  padding: 0 1rem;
+  padding: 0 0.55rem;
   border-radius: 6px;
+
+  &:hover {
+    color: var(--oc-accent);
+  }
 
   &:focus-visible {
     outline: 1px solid var(--oc-accent);

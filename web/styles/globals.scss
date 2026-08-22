@@ -207,6 +207,41 @@ body {
   outline-offset: 2px;
 }
 
+// Floating "back to top" helper on the emoji grid, shown once the ALL tab has
+// been scrolled deep. Sits above the picmo area bottom-right corner.
+.emoji-back-to-top {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--oc-border-subtle);
+  background: var(--oc-surface-header);
+  color: var(--oc-accent);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 30%);
+  z-index: 3;
+  transition:
+    transform 120ms var(--oc-motion-standard),
+    opacity 120ms ease;
+
+  &:hover {
+    transform: scale(1.08);
+  }
+
+  &:focus-visible {
+    outline: 1px solid var(--theme-color-action);
+    outline-offset: 2px;
+  }
+}
+
 .emoji-popover .emoji-tabs {
   border-bottom: 1px solid var(--oc-border-subtle);
   background: var(--oc-surface-header);

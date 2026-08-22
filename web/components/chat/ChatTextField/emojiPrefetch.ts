@@ -1,5 +1,5 @@
-const DEFAULT_CONCURRENCY = 2;
-const STABLE_PLAYBACK_DELAY_MS = 5000;
+const DEFAULT_CONCURRENCY = 1;
+const WARMUP_START_DELAY_MS = 2500;
 const THREE_G_PREFETCH_LIMIT = 48 * 3;
 
 type ConnectionInfo = {
@@ -88,6 +88,15 @@ export function prefetchEmojiUrl(url: string, signal?: AbortSignal): Promise<voi
 
   prefetchPromises.set(url, task);
   return task;
+}
+
+/**
+ * Record an emoji URL that is already being loaded by a visible <img> (the
+ * picker's viewport lazy loader), so background queues skip it and never
+ * re-request what the user has already seen.
+ */
+export function markEmojiLoaded(url: string): void {
+  if (url) prefetchedUrls.add(url);
 }
 
 export class EmojiPrefetchQueue {
@@ -182,105 +191,74 @@ export function prefetchPriorityEmoji(urls: string[], concurrency = 6): void {
   queue.resume();
 }
 
-function hasPlayingMedia(): boolean {
-  if (typeof document === 'undefined') return false;
-  return Array.from(document.querySelectorAll('video, audio')).some(media => {
-    const element = media as HTMLMediaElement;
-    return (
-      !element.paused && !element.ended && element.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
-    );
-  });
-}
-
 /**
- * Start background warming once playback has been stable for five seconds.
- * Buffering, offline, hidden-page and constrained-network states pause the
- * queue. All listeners, in-flight fetches and timers are cleaned up by the
- * returned function.
+ * Start a slow, single-threaded background warm of the emoji grid once the
+ * user has opened the picker for the first time (callers gate this). It is
+ * deliberately independent of video playback: no media events, no stable-
+ * playback window — it just trickles one image at a time into the HTTP cache
+ * so the whole grid is eventually cached even when the player is never used.
+ * Hidden-page, offline and constrained-network states pause the queue; all
+ * listeners, in-flight fetches and timers are cleaned up by the returned
+ * function.
  */
-export function startAdaptiveEmojiPrefetch(urls: string[]): () => void {
+export function startEmojiWarmup(urls: string[]): () => void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return () => undefined;
 
   const queue = new EmojiPrefetchQueue();
   const connection = connectionInfo();
-  let stableTimer: ReturnType<typeof setTimeout> | undefined;
+  let warmupTimer: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
+  const limit = backgroundPrefetchLimit(urls.length, connection);
 
-  const clearStableTimer = () => {
-    if (stableTimer !== undefined) clearTimeout(stableTimer);
-    stableTimer = undefined;
+  const clearWarmupTimer = () => {
+    if (warmupTimer !== undefined) clearTimeout(warmupTimer);
+    warmupTimer = undefined;
   };
 
-  const pause = () => {
-    clearStableTimer();
-    queue.pause(true);
-  };
+  const canRun = () =>
+    !disposed && document.visibilityState !== 'hidden' && navigator.onLine !== false && limit > 0;
 
   const schedule = () => {
-    pause();
-    if (
-      disposed ||
-      document.visibilityState === 'hidden' ||
-      navigator.onLine === false ||
-      backgroundPrefetchLimit(urls.length, connection) === 0
-    ) {
-      return;
-    }
-
-    stableTimer = setTimeout(() => {
-      stableTimer = undefined;
-      if (disposed || document.visibilityState === 'hidden' || navigator.onLine === false) return;
-
-      const limit = backgroundPrefetchLimit(urls.length, connection);
+    clearWarmupTimer();
+    if (!canRun()) return;
+    // Small grace delay so the visible rows (IntersectionObserver) win over
+    // the warmup queue when the picker first opens.
+    warmupTimer = setTimeout(() => {
+      warmupTimer = undefined;
+      if (!canRun()) return;
       queue.enqueue(urls.slice(0, limit));
       queue.resume();
-    }, STABLE_PLAYBACK_DELAY_MS);
+    }, WARMUP_START_DELAY_MS);
   };
 
-  const onMediaEvent = (event: Event) => {
-    if (!(event.target instanceof HTMLMediaElement)) return;
-    if (event.type === 'playing') schedule();
-    else pause();
-  };
+  const pauseQueue = () => queue.pause();
 
   const onVisibilityChange = () => {
-    if (document.visibilityState === 'hidden') {
-      pause();
-    } else if (hasPlayingMedia()) {
-      schedule();
-    }
+    if (document.visibilityState === 'hidden') pauseQueue();
+    else schedule();
   };
 
-  const onOnline = () => {
-    if (hasPlayingMedia()) schedule();
-  };
+  const onOnline = () => schedule();
 
   const onConnectionChange = () => {
     queue.clearPending();
-    if (hasPlayingMedia()) schedule();
-    else pause();
+    schedule();
   };
 
-  document.addEventListener('playing', onMediaEvent, true);
-  document.addEventListener('waiting', onMediaEvent, true);
-  document.addEventListener('stalled', onMediaEvent, true);
   document.addEventListener('visibilitychange', onVisibilityChange);
   window.addEventListener('online', onOnline);
-  window.addEventListener('offline', pause);
+  window.addEventListener('offline', pauseQueue);
   connection?.addEventListener?.('change', onConnectionChange);
 
-  if (hasPlayingMedia()) schedule();
+  schedule();
 
   return () => {
     disposed = true;
-    pause();
+    pauseQueue();
     queue.destroy();
-    document.removeEventListener('playing', onMediaEvent, true);
-    document.removeEventListener('waiting', onMediaEvent, true);
-    document.removeEventListener('stalled', onMediaEvent, true);
     document.removeEventListener('visibilitychange', onVisibilityChange);
     window.removeEventListener('online', onOnline);
-    window.removeEventListener('offline', pause);
+    window.removeEventListener('offline', pauseQueue);
     connection?.removeEventListener?.('change', onConnectionChange);
   };
 }

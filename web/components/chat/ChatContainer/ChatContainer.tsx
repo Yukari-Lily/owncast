@@ -118,15 +118,61 @@ export const ChatContainer: FC<ChatContainerProps> = ({
   const prevMessageCountRef = useRef(messages.length);
   // Dispose handle for ease-out wheel scrolling on Virtuoso's scroller element.
   const detachSmoothScroll = useRef<(() => void) | null>(null);
+  // Content-size observer: rows can grow a few px after mount (emoji images
+  // decoding), leaving a small gap below the last message when following the
+  // bottom. Re-anchor whenever content resizes while at the bottom.
+  const contentResizeObserver = useRef<ResizeObserver | null>(null);
+  // The actual DOM scroller, for exact physical-bottom alignment.
+  const scrollerElRef = useRef<HTMLElement | null>(null);
+
+  const scrollChatToBottom = ref => {
+    const list = ref.current;
+    if (!list) return;
+    if (typeof list.scrollToIndex === 'function' && messages.length > 0) {
+      list.scrollToIndex({ index: messages.length - 1, align: 'end', behavior: 'auto' });
+    } else {
+      list.scrollTo({ top: Infinity, left: 0, behavior: 'auto' });
+    }
+    setShowScrollToBottomButton(false);
+    // Virtualized alignment uses estimated row heights, which at high page
+    // zoom can leave several px of room below the last message. Clamp to the
+    // physical maximum scroll instead — content end against scroller bottom —
+    // which ignores estimates entirely and leaves no gap.
+    window.requestAnimationFrame(() => {
+      const scroller = scrollerElRef.current;
+      if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    });
+  };
+
+  // Keep the latest scroller callback in a ref so listeners created once on
+  // mount (initial scroll, viewport resize) never operate on a stale closure
+  // that captured the first render's `messages`.
+  const scrollToBottomRef = useRef(scrollChatToBottom);
+  scrollToBottomRef.current = scrollChatToBottom;
 
   const scrollerRef = useCallback((el: HTMLElement | Window | null) => {
     if (detachSmoothScroll.current) {
       detachSmoothScroll.current();
       detachSmoothScroll.current = null;
     }
+    if (contentResizeObserver.current) {
+      contentResizeObserver.current.disconnect();
+      contentResizeObserver.current = null;
+    }
+    scrollerElRef.current = el instanceof HTMLElement ? el : null;
     // Virtuoso may hand back Window in some configs; we only smooth HTMLElements.
     if (el && el instanceof HTMLElement) {
       detachSmoothScroll.current = attachSmoothWheelScroll(el, 'y');
+      const content = el.firstElementChild;
+      if (content instanceof HTMLElement) {
+        const observer = new ResizeObserver(() => {
+          if (isAtBottomRef.current) {
+            scrollToBottomRef.current(chatContainerRef);
+          }
+        });
+        observer.observe(content);
+        contentResizeObserver.current = observer;
+      }
     }
   }, []);
 
@@ -143,13 +189,25 @@ export const ChatContainer: FC<ChatContainerProps> = ({
     if (newChatMessages > 0 && !isAtBottomRef.current) {
       setUnreadCount(count => count + newChatMessages);
     }
+    // Virtuoso's followOutput aligns against estimated heights, which can
+    // leave a small gap below the newest message. Let it run first, then
+    // re-align with the physical scroll clamp.
+    if (newChatMessages > 0 && isAtBottomRef.current) {
+      window.setTimeout(() => scrollToBottomRef.current(chatContainerRef), 30);
+    }
   }, [messages]);
 
   // Warm custom-emoji images ahead of the scroll position so they decode from
-  // cache when their row mounts instead of stalling paint mid-scroll.
+  // cache when their row mounts instead of stalling paint mid-scroll. Only
+  // newly added messages are scanned — messages list is append-only, so
+  // re-scanning the whole history on every batch would be O(n) per update.
+  const lastEmojiScanRef = useRef(0);
   useEffect(() => {
     if (!backgroundEmojiPrefetchAllowed()) return;
-    const urls = collectChatEmojiUrls(messages);
+    const prev = lastEmojiScanRef.current;
+    if (messages.length <= prev) return;
+    lastEmojiScanRef.current = messages.length;
+    const urls = collectChatEmojiUrls(messages.slice(prev));
     if (urls.length > 0) prefetchPriorityEmoji(urls);
   }, [messages]);
 
@@ -160,6 +218,10 @@ export const ChatContainer: FC<ChatContainerProps> = ({
         if (detachSmoothScroll.current) {
           detachSmoothScroll.current();
           detachSmoothScroll.current = null;
+        }
+        if (contentResizeObserver.current) {
+          contentResizeObserver.current.disconnect();
+          contentResizeObserver.current = null;
         }
       },
     [],
@@ -290,24 +352,30 @@ export const ChatContainer: FC<ChatContainerProps> = ({
     }
   };
 
-  const scrollChatToBottom = ref => {
-    const list = ref.current;
-    if (!list) return;
-    if (typeof list.scrollToIndex === 'function' && messages.length > 0) {
-      list.scrollToIndex({ index: messages.length - 1, align: 'end', behavior: 'auto' });
-    } else {
-      list.scrollTo({ top: Infinity, left: 0, behavior: 'auto' });
-    }
-    setShowScrollToBottomButton(false);
-  };
-
   // This is a hack to force a scroll to the very bottom of the chat messages
   // on initial mount of the component.
   // For https://github.com/owncast/owncast/issues/2500
   useEffect(() => {
     setTimeout(() => {
-      scrollChatToBottom(chatContainerRef);
+      scrollToBottomRef.current(chatContainerRef);
     }, 500);
+  }, []);
+
+  // Keep the message list glued to the bottom when the viewport height
+  // changes (browser zoom, window resize, mobile chrome). Virtuoso keeps its
+  // pixel scroll offset on layout change, so an anchored chat ends up hanging
+  // above the input; re-scroll only if the user was already at the bottom.
+  useEffect(() => {
+    const onViewportResize = () => {
+      if (isAtBottomRef.current) scrollToBottomRef.current(chatContainerRef);
+    };
+    window.addEventListener('resize', onViewportResize);
+    const { visualViewport } = window;
+    visualViewport?.addEventListener('resize', onViewportResize);
+    return () => {
+      window.removeEventListener('resize', onViewportResize);
+      visualViewport?.removeEventListener('resize', onViewportResize);
+    };
   }, []);
 
   const MessagesTable = useMemo(
@@ -331,7 +399,12 @@ export const ChatContainer: FC<ChatContainerProps> = ({
             atBottom || messages[messages.length - 1]?.user?.id === chatUserId ? 'auto' : false
           }
           alignToBottom
-          atBottomThreshold={4}
+          // Tolerant of virtualized measurement drift (worst at high page
+          // zoom, where fractional row heights re-measure with a few px of
+          // error): a too-tight threshold reports "not at bottom" while the
+          // user is visually at it, popping the unread pill and counting
+          // fresh messages as unread.
+          atBottomThreshold={32}
           atBottomStateChange={bottom => {
             isAtBottomRef.current = bottom;
             setShowScrollToBottomButton(!bottom);

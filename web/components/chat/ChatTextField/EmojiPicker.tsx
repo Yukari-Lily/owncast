@@ -13,8 +13,9 @@ import { attachSmoothWheelScroll } from '../../../utils/smoothWheelScroll';
 import { LazyCustomEmojiRenderer } from './LazyCustomEmojiRenderer';
 import {
   backgroundEmojiPrefetchAllowed,
+  markEmojiLoaded,
   prefetchPriorityEmoji,
-  startAdaptiveEmojiPrefetch,
+  startEmojiWarmup,
 } from './emojiPrefetch';
 
 export type EmojiPickerProps = {
@@ -254,6 +255,9 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
   const openRef = useRef(open);
   openRef.current = open;
 
+  // Floating "back to top" helper for the ALL grid once it is scrolled deep.
+  const [showBackToTop, setShowBackToTop] = useState(false);
+
   // Group custom emoji by their emoji folder (derived from the URL path).
   // A Map preserves insertion order, which matches the server's WalkDir order
   // (the user numbers folders 00, 01, 02... to control tab order).
@@ -329,7 +333,7 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
         isAll && backgroundEmojiPrefetchAllowed()
           ? new Set(list.slice(0, ALL_INITIAL_IMAGE_COUNT).map(emoji => emoji.url))
           : new Set<string>();
-      const renderer = new LazyCustomEmojiRenderer(eagerUrls);
+      const renderer = new LazyCustomEmojiRenderer(eagerUrls, markEmojiLoaded);
       const picker = createPicker({
         rootElement: host,
         theme: 'dark',
@@ -394,7 +398,6 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
 
         let animationFrame: number | undefined;
         const prefetchAdjacentRows = () => {
-          animationFrame = undefined;
           if (!backgroundEmojiPrefetchAllowed()) return;
           const visibleCount = ALL_INITIAL_IMAGE_COUNT;
           const maxStart = Math.max(0, list.length - visibleCount);
@@ -402,14 +405,24 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
           const currentStart = Math.round((area.scrollTop / scrollRange) * maxStart);
           const adjacentStart = Math.max(0, currentStart - visibleCount);
           const adjacentEnd = Math.min(list.length, currentStart + visibleCount * 2);
-          prefetchPriorityEmoji(
-            list.slice(adjacentStart, adjacentEnd).map(emoji => emoji.url),
-            2,
+          const windowUrls = list.slice(adjacentStart, adjacentEnd).map(emoji => emoji.url);
+          prefetchPriorityEmoji(windowUrls, 2);
+          // Resolve placeholders just ahead of (and behind) the viewport so a
+          // fast scroll lands on already-created <img>s — no placeholder flash
+          // even when the bytes are already in the HTTP cache.
+          const resolveEnd = Math.min(list.length, currentStart + visibleCount);
+          entry.renderer.resolveRange(
+            list.slice(adjacentStart, resolveEnd).map(emoji => emoji.url),
           );
+        };
+        const onScrollFrame = () => {
+          animationFrame = undefined;
+          prefetchAdjacentRows();
+          setShowBackToTop(area.scrollTop > area.clientHeight * 0.6);
         };
         const handleScroll = () => {
           if (animationFrame === undefined) {
-            animationFrame = window.requestAnimationFrame(prefetchAdjacentRows);
+            animationFrame = window.requestAnimationFrame(onScrollFrame);
           }
         };
         area.addEventListener('scroll', handleScroll, { passive: true });
@@ -491,15 +504,21 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
   // (width:0; min-width:100%) does not collapse mid-hide animation.
   // Showing the active tab is handled by the activeGroup effect below (also
   // re-runs when open flips true).
-  const hasOpenedRef = useRef(false);
+  //
+  // No eager resolveAll on open/close: closed hosts keep their placeholders
+  // (picmo's IntersectionObserver never fires on display:none), and the shown
+  // host only resolves rows that enter the viewport. Full background warmup
+  // is handled by the post-first-open warmup queue (see warmStarted below).
+  const [warmStarted, setWarmStarted] = useState(false);
+  const warmStartedRef = useRef(false);
   useLayoutEffect(() => {
     const hostsRoot = hostsRootRef.current;
     const shell = hostsRoot?.parentElement as HTMLElement | null;
     if (open) {
-      if (hasOpenedRef.current && backgroundEmojiPrefetchAllowed()) {
-        cacheRef.current.forEach(entry => entry.renderer.resolveAll());
+      if (!warmStartedRef.current) {
+        warmStartedRef.current = true;
+        setWarmStarted(true);
       }
-      hasOpenedRef.current = true;
       if (hostsRoot) hostsRoot.style.display = '';
       // Clear close-time size freeze so fit-content tracks picmo again.
       if (shell) {
@@ -523,12 +542,13 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
     if (hostsRoot) hostsRoot.style.display = 'none';
     // Keep cache + hosts mounted. Pending reveal timers are fine: opacity 1
     // while hidden is harmless and avoids stuck opacity-0 after cancel.
-    if (!hasOpenedRef.current || !backgroundEmojiPrefetchAllowed()) return undefined;
-    const hydrateTimer = window.setTimeout(() => {
-      cacheRef.current.forEach(entry => entry.renderer.resolveAll());
-    }, 0);
-    return () => window.clearTimeout(hydrateTimer);
+    return undefined;
   }, [open]);
+
+  // Reset the back-to-top helper when the panel closes or the tab changes.
+  useEffect(() => {
+    setShowBackToTop(false);
+  }, [open, activeGroup]);
 
   // Tab switch / reopen: pure show/hide of cached hosts (or create on demand).
   useLayoutEffect(() => {
@@ -600,24 +620,28 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
     };
   }, [customEmoji, ensurePicker]);
 
-  // Warm only what is needed for an instant first paint: every folder cover
-  // and the first 48 ALL entries. Remaining images are handled by Picmo's
-  // IntersectionObserver and the playback-aware background queue below.
+  // Warm only what is needed for an instant first paint: the first ALL page
+  // (doubled by the renderer's eager URLs). Tab covers need no prefetch — the
+  // tab strip <img>s load them on their own — and everything else is handled
+  // by the viewport IO plus the post-first-open warmup queue.
   useEffect(() => {
     if (!customEmoji?.length || !backgroundEmojiPrefetchAllowed()) return;
-    const coverUrls = Array.from(groups.values())
-      .map(tabThumbUrl)
-      .filter((url): url is string => Boolean(url));
-    const initialUrls = emojisFor(ALL)
-      .slice(0, ALL_INITIAL_IMAGE_COUNT)
-      .map(emoji => emoji.url);
-    prefetchPriorityEmoji([...coverUrls, ...initialUrls]);
-  }, [customEmoji, groups, emojisFor]);
-
-  useEffect(() => {
-    if (!customEmoji?.length) return undefined;
-    return startAdaptiveEmojiPrefetch(emojisFor(ALL).map(emoji => emoji.url));
+    prefetchPriorityEmoji(
+      emojisFor(ALL)
+        .slice(0, ALL_INITIAL_IMAGE_COUNT)
+        .map(emoji => emoji.url),
+    );
   }, [customEmoji, emojisFor]);
+
+  // Full background warmup only after the user has opened the picker at least
+  // once. Users who never use the emoji panel keep zero background downloads.
+  // Once started, the single-threaded queue (independent of video playback)
+  // gently tops the whole grid into the cache, replacing the old eagerly
+  // resolve-everything bursts.
+  useEffect(() => {
+    if (!warmStarted || !customEmoji?.length) return undefined;
+    return startEmojiWarmup(emojisFor(ALL).map(emoji => emoji.url));
+  }, [warmStarted, customEmoji, emojisFor]);
 
   // Tab list: [ALL] [<folder>...]. "ALL" uses a grid icon; each folder tab
   // uses *_cover* if present, otherwise the first emoji in that folder.
@@ -641,30 +665,31 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
     return attachSmoothWheelScroll(el, 'x');
   }, []);
 
-  // Prefetch a tab's picmo instance + image URLs on hover/focus so the click
-  // is usually a pure show. Works while open or closed (cache survives close).
-  const prewarmTab = useCallback(
-    (key: string) => {
-      if (!backgroundEmojiPrefetchAllowed()) return;
-      if (!cacheRef.current.has(key)) {
-        prefetchPriorityEmoji(emojisFor(key).map(emoji => emoji.url));
-      }
-      ensurePicker(key);
-    },
-    [emojisFor, ensurePicker],
-  );
+  // Prebuild a tab's picmo instance on hover/focus/touch so the click is a
+  // pure show. Downloads nothing: the lazy renderer keeps every image as a
+  // viewport placeholder until it actually enters the panel, which is where
+  // IO + the scroll lookahead load images. Works open or closed (cache
+  // survives close).
+  const prewarmTab = useCallback((key: string) => ensurePicker(key), [ensurePicker]);
 
   // Root is width:fit-content so its size is driven by the picmo child
   // (--picker-width, which custom CSS may enlarge). The tab strip uses the
   // width:0 + min-width:100% trick so it fills that width and scrolls instead
   // of contributing its long content width to the parent (which previously
   // stretched the popover across the whole chat).
+  const scrollActiveAreaToTop = () => {
+    const entry = cacheRef.current.get(activeGroupRef.current);
+    const area = entry?.host.querySelector('.picmo__emojiArea, .emojiArea') as HTMLElement | null;
+    area?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   return (
     <div
       className="emoji-picker-root"
       style={{
         display: 'flex',
         flexDirection: 'column',
+        position: 'relative',
         width: 'fit-content',
         maxWidth: 'calc(100vw - 1.5rem)',
       }}
@@ -718,6 +743,17 @@ export const EmojiPicker: FC<EmojiPickerProps> = ({
       </div>
       {/* Hosts for cached picmo instances (one child host per visited tab). */}
       <div ref={hostsRootRef} className="emoji-picker-hosts" />
+      {open && showBackToTop && (
+        <button
+          type="button"
+          aria-label="Back to top"
+          title="Back to top"
+          className="emoji-back-to-top"
+          onClick={scrollActiveAreaToTop}
+        >
+          ↑
+        </button>
+      )}
     </div>
   );
 };

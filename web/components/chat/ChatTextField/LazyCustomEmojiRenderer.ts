@@ -11,11 +11,16 @@ import type { LazyLoader } from 'picmo/dist/LazyLoader';
 export class LazyCustomEmojiRenderer extends NativeRenderer {
   private readonly eagerUrls: ReadonlySet<string>;
 
-  private readonly pendingResolvers = new Set<() => void>();
+  private readonly onResolved?: (url: string) => void;
 
-  constructor(eagerUrls: ReadonlySet<string> = new Set()) {
+  // Placeholder resolvers still pending, keyed by URL so a bounded lookahead
+  // can resolve a window of rows without resolving the whole grid.
+  private readonly pending = new Map<string, () => void>();
+
+  constructor(eagerUrls: ReadonlySet<string>, onResolved?: (url: string) => void) {
     super();
     this.eagerUrls = eagerUrls;
+    this.onResolved = onResolved;
   }
 
   renderCustom(emoji: CustomEmoji, lazyLoader?: LazyLoader, additionalClasses = ''): Element {
@@ -25,12 +30,10 @@ export class LazyCustomEmojiRenderer extends NativeRenderer {
 
     if (!resolver) return element;
 
-    let resolved = false;
     const resolve = () => {
-      if (resolved) return;
-      resolved = true;
-      this.pendingResolvers.delete(resolve);
+      this.pending.delete(emoji.url);
       resolver();
+      this.onResolved?.(emoji.url);
     };
 
     if (!lazyLoader || this.eagerUrls.has(emoji.url)) {
@@ -38,11 +41,15 @@ export class LazyCustomEmojiRenderer extends NativeRenderer {
       return element;
     }
 
-    this.pendingResolvers.add(resolve);
+    this.pending.set(emoji.url, resolve);
     return lazyLoader.lazyLoad(element as HTMLElement, resolve);
   }
 
-  resolveAll(): void {
-    Array.from(this.pendingResolvers).forEach(resolve => resolve());
+  /** Resolve the placeholder of every listed URL that is still pending. */
+  resolveRange(urls: string[]): void {
+    urls.forEach(url => {
+      const resolve = this.pending.get(url);
+      if (resolve) resolve();
+    });
   }
 }
