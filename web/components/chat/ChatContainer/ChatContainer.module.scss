@@ -9,7 +9,7 @@
   // Track the visual viewport: on mobile --app-vh can be shorter than 100vh
   // when the browser bar/keyboard covers the bottom, so offset by the gap to
   // keep the button above the input instead of behind the browser chrome.
-  bottom: calc(var(--oc-chat-composer-height, 54px) + (100vh - var(--app-vh, 100vh)));
+  bottom: calc(var(--oc-chat-composer-height, 60px) + (100vh - var(--app-vh, 100vh)));
   color: var(--theme-color-components-chat-background);
 
   button {
