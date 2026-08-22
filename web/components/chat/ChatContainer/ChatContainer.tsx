@@ -181,20 +181,22 @@ export const ChatContainer: FC<ChatContainerProps> = ({
     prevMessageCountRef.current = messages.length;
     if (messages.length <= previousCount) return;
 
-    const newChatMessages = messages
-      .slice(previousCount)
-      .filter(
-        message => message.type === MessageType.CHAT || message.type === MessageType.CHAT_ACTION,
-      ).length;
+    const addedMessages = messages.slice(previousCount);
+    const newChatMessages = addedMessages.filter(
+      message => message.type === MessageType.CHAT || message.type === MessageType.CHAT_ACTION,
+    ).length;
     if (newChatMessages > 0 && !isAtBottomRef.current) {
       setUnreadCount(count => count + newChatMessages);
     }
     // Owncast takes over bottom scrolling from followOutput. Scroll (with the
     // physical clamp) when the user was at the bottom or when they sent the
     // newest message themselves — mirroring the previous followOutput logic.
+    // Follow on ANY appended message, not just chat lines: join/part and other
+    // system rows mount below the fold, and a user glued to the bottom expects
+    // the view to ride along. Only chat lines accrue the unread pill.
     const lastMessage = messages[messages.length - 1];
     const shouldFollow = isAtBottomRef.current || lastMessage?.user?.id === chatUserId;
-    if (newChatMessages > 0 && shouldFollow) {
+    if (addedMessages.length > 0 && shouldFollow) {
       window.setTimeout(() => scrollToBottomRef.current(chatContainerRef), 30);
     }
   }, [messages]);
