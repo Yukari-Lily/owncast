@@ -189,10 +189,12 @@ export const ChatContainer: FC<ChatContainerProps> = ({
     if (newChatMessages > 0 && !isAtBottomRef.current) {
       setUnreadCount(count => count + newChatMessages);
     }
-    // Virtuoso's followOutput aligns against estimated heights, which can
-    // leave a small gap below the newest message. Let it run first, then
-    // re-align with the physical scroll clamp.
-    if (newChatMessages > 0 && isAtBottomRef.current) {
+    // Owncast takes over bottom scrolling from followOutput. Scroll (with the
+    // physical clamp) when the user was at the bottom or when they sent the
+    // newest message themselves — mirroring the previous followOutput logic.
+    const lastMessage = messages[messages.length - 1];
+    const shouldFollow = isAtBottomRef.current || lastMessage?.user?.id === chatUserId;
+    if (newChatMessages > 0 && shouldFollow) {
       window.setTimeout(() => scrollToBottomRef.current(chatContainerRef), 30);
     }
   }, [messages]);
@@ -395,9 +397,12 @@ export const ChatContainer: FC<ChatContainerProps> = ({
           increaseViewportBy={800}
           itemContent={(index, message) => getViewForMessage(index, message)}
           initialTopMostItemIndex={messages.length - 1}
-          followOutput={atBottom =>
-            atBottom || messages[messages.length - 1]?.user?.id === chatUserId ? 'auto' : false
-          }
+          // Owncast handles all bottom scrolling itself (see the messages
+          // effect): followOutput aligns against estimated row heights, which
+          // at high page zoom leaves a gap below the newest message. Keeping
+          // it off means every return to the bottom goes through
+          // scrollChatToBottom and its physical scroll clamp.
+          followOutput={false}
           alignToBottom
           // Tolerant of virtualized measurement drift (worst at high page
           // zoom, where fractional row heights re-measure with a few px of
