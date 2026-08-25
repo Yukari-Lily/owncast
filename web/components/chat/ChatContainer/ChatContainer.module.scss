@@ -6,10 +6,12 @@
   display: flex;
   justify-content: center;
   position: absolute;
-  // Track the visual viewport: on mobile --app-vh can be shorter than 100vh
-  // when the browser bar/keyboard covers the bottom, so offset by the gap to
-  // keep the button above the input instead of behind the browser chrome.
-  bottom: calc(var(--oc-chat-composer-height, 55px) + (100vh - var(--app-vh, 100vh)));
+  left: 0;
+  right: 0;
+  // The chat container already follows the visual viewport on mobile, so only
+  // offset by the composer height. Adding the 100vh/app-vh delta here would
+  // count the browser-bar offset twice and lift the button too far upward.
+  bottom: var(--oc-chat-composer-height, 55px);
   color: var(--theme-color-components-chat-background);
 
   button {
@@ -65,6 +67,7 @@
   overflow-y: scroll;
   overflow-x: hidden;
   overscroll-behavior: contain;
+  scrollbar-width: none;
 }
 
 .virtuoso::-webkit-scrollbar {

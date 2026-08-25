@@ -122,7 +122,7 @@ export const ChatContainer: FC<ChatContainerProps> = ({
   // The actual DOM scroller, for exact physical-bottom alignment.
   const scrollerElRef = useRef<HTMLElement | null>(null);
   const scrollAnimationFrameRef = useRef<number | null>(null);
-  const scrollTimerRef = useRef<number | null>(null);
+  const automaticScrollFrameRef = useRef<number | null>(null);
   const initialScrollTimerRef = useRef<number | null>(null);
   // Remains active while an automatic follow is in progress, including while
   // Virtuoso is measuring rows after an append. User interaction cancels it.
@@ -136,11 +136,17 @@ export const ChatContainer: FC<ChatContainerProps> = ({
 
   const clampScrollerToBottom = () => {
     const scroller = scrollerElRef.current;
-    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    if (!scroller) return false;
+    const { scrollHeight, clientHeight, scrollTop } = scroller;
+    const bottom = Math.max(0, scrollHeight - clientHeight);
+    if (Math.abs(bottom - scrollTop) < 1) return false;
+    scroller.scrollTop = bottom;
+    return true;
   };
 
   const schedulePhysicalBottomClamp = () => {
-    clampScrollerToBottom();
+    const changed = clampScrollerToBottom();
+    if (!changed && scrollAnimationFrameRef.current === null) return;
     if (scrollAnimationFrameRef.current !== null) {
       window.cancelAnimationFrame(scrollAnimationFrameRef.current);
     }
@@ -175,17 +181,20 @@ export const ChatContainer: FC<ChatContainerProps> = ({
   const scrollToBottomRef = useRef(scrollChatToBottom);
   scrollToBottomRef.current = scrollChatToBottom;
 
-  const scheduleScrollToBottom = () => {
-    scrollToBottomRef.current(chatContainerRef);
-    if (scrollTimerRef.current !== null) {
-      window.clearTimeout(scrollTimerRef.current);
+  // Coalesce foreground updates into one measured frame. A hidden tab gets an
+  // immediate attempt because requestAnimationFrame may be throttled there.
+  const requestAutomaticBottomScroll = () => {
+    if (document.visibilityState === 'hidden') {
+      scrollToBottomRef.current(chatContainerRef);
+      return;
     }
-    scrollTimerRef.current = window.setTimeout(() => {
-      scrollTimerRef.current = null;
+    if (automaticScrollFrameRef.current !== null) return;
+    automaticScrollFrameRef.current = window.requestAnimationFrame(() => {
+      automaticScrollFrameRef.current = null;
       if (shouldFollowBottomRef.current) {
         scrollToBottomRef.current(chatContainerRef);
       }
-    }, 30);
+    });
   };
 
   const scrollerRef = useCallback((el: HTMLElement | Window | null) => {
@@ -254,7 +263,7 @@ export const ChatContainer: FC<ChatContainerProps> = ({
     if (addedMessages.length > 0) {
       shouldFollowBottomRef.current = shouldFollow;
       if (shouldFollow) {
-        scheduleScrollToBottom();
+        requestAutomaticBottomScroll();
       }
     }
   }, [messages]);
@@ -277,13 +286,13 @@ export const ChatContainer: FC<ChatContainerProps> = ({
     () =>
       // Clear the wheel-scroll listener when the component unmounts
       () => {
-        if (scrollTimerRef.current !== null) {
-          window.clearTimeout(scrollTimerRef.current);
-          scrollTimerRef.current = null;
-        }
         if (scrollAnimationFrameRef.current !== null) {
           window.cancelAnimationFrame(scrollAnimationFrameRef.current);
           scrollAnimationFrameRef.current = null;
+        }
+        if (automaticScrollFrameRef.current !== null) {
+          window.cancelAnimationFrame(automaticScrollFrameRef.current);
+          automaticScrollFrameRef.current = null;
         }
         if (initialScrollTimerRef.current !== null) {
           window.clearTimeout(initialScrollTimerRef.current);
@@ -458,7 +467,7 @@ export const ChatContainer: FC<ChatContainerProps> = ({
       wasBackgroundedRef.current = false;
       if (wasAtBottomBeforeBackgroundRef.current || shouldFollowBottomRef.current) {
         shouldFollowBottomRef.current = true;
-        scheduleScrollToBottom();
+        requestAutomaticBottomScroll();
       }
       wasAtBottomBeforeBackgroundRef.current = false;
     };
@@ -493,58 +502,46 @@ export const ChatContainer: FC<ChatContainerProps> = ({
 
   const MessagesTable = useMemo(
     () => (
-      <>
-        <Virtuoso
-          id="virtuoso"
-          style={{ height }}
-          className={styles.virtuoso}
-          ref={chatContainerRef}
-          scrollerRef={scrollerRef}
-          data={messages}
-          computeItemKey={(_, message) => message.id}
-          // Pre-render rows above/below the viewport so fast wheel scrolling
-          // doesn't show blank space while new rows mount, including tall
-          // text-heavy messages.
-          increaseViewportBy={800}
-          itemContent={(index, message) => getViewForMessage(index, message)}
-          initialTopMostItemIndex={messages.length - 1}
-          // Owncast handles bottom scrolling itself so every follow goes
-          // through scrollChatToBottom and its physical scroll clamp.
-          followOutput={false}
-          alignToBottom
-          // Tolerant of virtualized measurement drift (worst at high page
-          // zoom, where fractional row heights re-measure with a few px of
-          // error): a too-tight threshold reports "not at bottom" while the
-          // user is visually at it, popping the unread pill and counting
-          // fresh messages as unread.
-          atBottomThreshold={32}
-          atBottomStateChange={bottom => {
-            isAtBottomRef.current = bottom;
-            setShowScrollToBottomButton(!bottom);
-            if (bottom) {
-              shouldFollowBottomRef.current = false;
-              setUnreadCount(0);
-            }
-          }}
-          totalListHeightChanged={() => {
-            if (isAtBottomRef.current || shouldFollowBottomRef.current) {
-              scheduleScrollToBottom();
-            }
-          }}
-        />
-        {showScrollToBottomButton && (
-          <ScrollToBotBtn
-            count={unreadCount}
-            onClick={() => {
-              shouldFollowBottomRef.current = false;
-              scrollChatToBottom(chatContainerRef);
-              setUnreadCount(0);
-            }}
-          />
-        )}
-      </>
+      <Virtuoso
+        id="virtuoso"
+        style={{ height }}
+        className={styles.virtuoso}
+        ref={chatContainerRef}
+        scrollerRef={scrollerRef}
+        data={messages}
+        computeItemKey={(_, message) => message.id}
+        // Pre-render rows above/below the viewport so fast wheel scrolling
+        // doesn't show blank space while new rows mount, including tall
+        // text-heavy messages.
+        increaseViewportBy={800}
+        itemContent={(index, message) => getViewForMessage(index, message)}
+        initialTopMostItemIndex={messages.length - 1}
+        // Owncast handles bottom scrolling itself so every follow goes
+        // through scrollChatToBottom and its physical scroll clamp.
+        followOutput={false}
+        alignToBottom
+        // Tolerant of virtualized measurement drift (worst at high page
+        // zoom, where fractional row heights re-measure with a few px of
+        // error): a too-tight threshold reports "not at bottom" while the
+        // user is visually at it, popping the unread pill and counting
+        // fresh messages as unread.
+        atBottomThreshold={32}
+        atBottomStateChange={bottom => {
+          isAtBottomRef.current = bottom;
+          setShowScrollToBottomButton(!bottom);
+          if (bottom) {
+            shouldFollowBottomRef.current = false;
+            setUnreadCount(0);
+          }
+        }}
+        totalListHeightChanged={() => {
+          if (isAtBottomRef.current || shouldFollowBottomRef.current) {
+            schedulePhysicalBottomClamp();
+          }
+        }}
+      />
     ),
-    [messages, usernameToHighlight, chatUserId, isModerator, showScrollToBottomButton, unreadCount],
+    [messages, usernameToHighlight, chatUserId, isModerator],
   );
 
   const defaultChatWidth: number = 320;
@@ -614,6 +611,16 @@ export const ChatContainer: FC<ChatContainerProps> = ({
         style={desktop && { width: `${defaultChatWidth}px` }}
       >
         {MessagesTable}
+        {showScrollToBottomButton && (
+          <ScrollToBotBtn
+            count={unreadCount}
+            onClick={() => {
+              shouldFollowBottomRef.current = false;
+              scrollChatToBottom(chatContainerRef);
+              setUnreadCount(0);
+            }}
+          />
+        )}
         {showInput && (
           <div className={styles.chatTextField}>
             <ChatTextField enabled={chatEnabled} focusInput={focusInput} />
