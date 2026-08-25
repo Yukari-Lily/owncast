@@ -118,12 +118,37 @@ export const ChatContainer: FC<ChatContainerProps> = ({
   const prevMessageCountRef = useRef(messages.length);
   // Dispose handle for ease-out wheel scrolling on Virtuoso's scroller element.
   const detachSmoothScroll = useRef<(() => void) | null>(null);
-  // Content-size observer: rows can grow a few px after mount (emoji images
-  // decoding), leaving a small gap below the last message when following the
-  // bottom. Re-anchor whenever content resizes while at the bottom.
-  const contentResizeObserver = useRef<ResizeObserver | null>(null);
+  const detachBottomInteractionListeners = useRef<(() => void) | null>(null);
   // The actual DOM scroller, for exact physical-bottom alignment.
   const scrollerElRef = useRef<HTMLElement | null>(null);
+  const scrollAnimationFrameRef = useRef<number | null>(null);
+  const scrollTimerRef = useRef<number | null>(null);
+  const initialScrollTimerRef = useRef<number | null>(null);
+  // Remains active while an automatic follow is in progress, including while
+  // Virtuoso is measuring rows after an append. User interaction cancels it.
+  const shouldFollowBottomRef = useRef(false);
+  const lastScrollTopRef = useRef(0);
+  // A hidden tab can defer timers, animation frames, and layout notifications.
+  // Remember whether it was at the bottom so the next visible frame can
+  // perform a final correction.
+  const wasAtBottomBeforeBackgroundRef = useRef(false);
+  const wasBackgroundedRef = useRef(false);
+
+  const clampScrollerToBottom = () => {
+    const scroller = scrollerElRef.current;
+    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+  };
+
+  const schedulePhysicalBottomClamp = () => {
+    clampScrollerToBottom();
+    if (scrollAnimationFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollAnimationFrameRef.current);
+    }
+    scrollAnimationFrameRef.current = window.requestAnimationFrame(() => {
+      scrollAnimationFrameRef.current = null;
+      clampScrollerToBottom();
+    });
+  };
 
   const scrollChatToBottom = ref => {
     const list = ref.current;
@@ -138,10 +163,10 @@ export const ChatContainer: FC<ChatContainerProps> = ({
     // zoom can leave several px of room below the last message. Clamp to the
     // physical maximum scroll instead — content end against scroller bottom —
     // which ignores estimates entirely and leaves no gap.
-    window.requestAnimationFrame(() => {
-      const scroller = scrollerElRef.current;
-      if (scroller) scroller.scrollTop = scroller.scrollHeight;
-    });
+    // Clamp immediately as well as on the next frame. The immediate write is
+    // important while the page is backgrounded, where requestAnimationFrame
+    // may be throttled or paused.
+    schedulePhysicalBottomClamp();
   };
 
   // Keep the latest scroller callback in a ref so listeners created once on
@@ -150,29 +175,62 @@ export const ChatContainer: FC<ChatContainerProps> = ({
   const scrollToBottomRef = useRef(scrollChatToBottom);
   scrollToBottomRef.current = scrollChatToBottom;
 
+  const scheduleScrollToBottom = () => {
+    scrollToBottomRef.current(chatContainerRef);
+    if (scrollTimerRef.current !== null) {
+      window.clearTimeout(scrollTimerRef.current);
+    }
+    scrollTimerRef.current = window.setTimeout(() => {
+      scrollTimerRef.current = null;
+      if (shouldFollowBottomRef.current) {
+        scrollToBottomRef.current(chatContainerRef);
+      }
+    }, 30);
+  };
+
   const scrollerRef = useCallback((el: HTMLElement | Window | null) => {
     if (detachSmoothScroll.current) {
       detachSmoothScroll.current();
       detachSmoothScroll.current = null;
     }
-    if (contentResizeObserver.current) {
-      contentResizeObserver.current.disconnect();
-      contentResizeObserver.current = null;
+    if (detachBottomInteractionListeners.current) {
+      detachBottomInteractionListeners.current();
+      detachBottomInteractionListeners.current = null;
     }
     scrollerElRef.current = el instanceof HTMLElement ? el : null;
     // Virtuoso may hand back Window in some configs; we only smooth HTMLElements.
     if (el && el instanceof HTMLElement) {
       detachSmoothScroll.current = attachSmoothWheelScroll(el, 'y');
-      const content = el.firstElementChild;
-      if (content instanceof HTMLElement) {
-        const observer = new ResizeObserver(() => {
-          if (isAtBottomRef.current) {
-            scrollToBottomRef.current(chatContainerRef);
-          }
-        });
-        observer.observe(content);
-        contentResizeObserver.current = observer;
-      }
+      const cancelAutomaticFollow = () => {
+        shouldFollowBottomRef.current = false;
+      };
+      el.addEventListener('wheel', cancelAutomaticFollow, { passive: true });
+      el.addEventListener('pointerdown', cancelAutomaticFollow, { passive: true });
+      el.addEventListener('touchstart', cancelAutomaticFollow, { passive: true });
+      const cancelOnKeyboardScroll = (event: KeyboardEvent) => {
+        if (
+          ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)
+        ) {
+          cancelAutomaticFollow();
+        }
+      };
+      el.addEventListener('keydown', cancelOnKeyboardScroll, { passive: true });
+      const handleScroll = () => {
+        const { scrollTop } = el;
+        if (scrollTop < lastScrollTopRef.current - 1) {
+          cancelAutomaticFollow();
+        }
+        lastScrollTopRef.current = scrollTop;
+      };
+      el.addEventListener('scroll', handleScroll, { passive: true });
+      detachBottomInteractionListeners.current = () => {
+        el.removeEventListener('wheel', cancelAutomaticFollow);
+        el.removeEventListener('pointerdown', cancelAutomaticFollow);
+        el.removeEventListener('touchstart', cancelAutomaticFollow);
+        el.removeEventListener('keydown', cancelOnKeyboardScroll);
+        el.removeEventListener('scroll', handleScroll);
+      };
+      lastScrollTopRef.current = el.scrollTop;
     }
   }, []);
 
@@ -188,16 +246,16 @@ export const ChatContainer: FC<ChatContainerProps> = ({
     if (newChatMessages > 0 && !isAtBottomRef.current) {
       setUnreadCount(count => count + newChatMessages);
     }
-    // Owncast takes over bottom scrolling from followOutput. Scroll (with the
-    // physical clamp) when the user was at the bottom or when they sent the
-    // newest message themselves — mirroring the previous followOutput logic.
-    // Follow on ANY appended message, not just chat lines: join/part and other
-    // system rows mount below the fold, and a user glued to the bottom expects
-    // the view to ride along. Only chat lines accrue the unread pill.
+    // Follow all appended rows when the user was at the bottom. A local
+    // message also follows the existing behavior and returns to the latest
+    // message even if the user was scrolled up.
     const lastMessage = messages[messages.length - 1];
     const shouldFollow = isAtBottomRef.current || lastMessage?.user?.id === chatUserId;
-    if (addedMessages.length > 0 && shouldFollow) {
-      window.setTimeout(() => scrollToBottomRef.current(chatContainerRef), 30);
+    if (addedMessages.length > 0) {
+      shouldFollowBottomRef.current = shouldFollow;
+      if (shouldFollow) {
+        scheduleScrollToBottom();
+      }
     }
   }, [messages]);
 
@@ -219,13 +277,25 @@ export const ChatContainer: FC<ChatContainerProps> = ({
     () =>
       // Clear the wheel-scroll listener when the component unmounts
       () => {
+        if (scrollTimerRef.current !== null) {
+          window.clearTimeout(scrollTimerRef.current);
+          scrollTimerRef.current = null;
+        }
+        if (scrollAnimationFrameRef.current !== null) {
+          window.cancelAnimationFrame(scrollAnimationFrameRef.current);
+          scrollAnimationFrameRef.current = null;
+        }
+        if (initialScrollTimerRef.current !== null) {
+          window.clearTimeout(initialScrollTimerRef.current);
+          initialScrollTimerRef.current = null;
+        }
         if (detachSmoothScroll.current) {
           detachSmoothScroll.current();
           detachSmoothScroll.current = null;
         }
-        if (contentResizeObserver.current) {
-          contentResizeObserver.current.disconnect();
-          contentResizeObserver.current = null;
+        if (detachBottomInteractionListeners.current) {
+          detachBottomInteractionListeners.current();
+          detachBottomInteractionListeners.current = null;
         }
       },
     [],
@@ -360,9 +430,48 @@ export const ChatContainer: FC<ChatContainerProps> = ({
   // on initial mount of the component.
   // For https://github.com/owncast/owncast/issues/2500
   useEffect(() => {
-    setTimeout(() => {
+    initialScrollTimerRef.current = window.setTimeout(() => {
+      initialScrollTimerRef.current = null;
       scrollToBottomRef.current(chatContainerRef);
     }, 500);
+
+    return () => {
+      if (initialScrollTimerRef.current !== null) {
+        window.clearTimeout(initialScrollTimerRef.current);
+        initialScrollTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  // A background tab may defer the layout work needed by Virtuoso. Re-run the
+  // same bottom sync when it becomes visible, but only if it was at the bottom
+  // before the tab was backgrounded (or already has an auto-follow pending).
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        wasBackgroundedRef.current = true;
+        wasAtBottomBeforeBackgroundRef.current = isAtBottomRef.current;
+        return;
+      }
+
+      if (!wasBackgroundedRef.current) return;
+      wasBackgroundedRef.current = false;
+      if (wasAtBottomBeforeBackgroundRef.current || shouldFollowBottomRef.current) {
+        shouldFollowBottomRef.current = true;
+        scheduleScrollToBottom();
+      }
+      wasAtBottomBeforeBackgroundRef.current = false;
+    };
+
+    if (document.visibilityState === 'hidden') {
+      wasBackgroundedRef.current = true;
+      wasAtBottomBeforeBackgroundRef.current = isAtBottomRef.current;
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   // Keep the message list glued to the bottom when the viewport height
@@ -399,11 +508,8 @@ export const ChatContainer: FC<ChatContainerProps> = ({
           increaseViewportBy={800}
           itemContent={(index, message) => getViewForMessage(index, message)}
           initialTopMostItemIndex={messages.length - 1}
-          // Owncast handles all bottom scrolling itself (see the messages
-          // effect): followOutput aligns against estimated row heights, which
-          // at high page zoom leaves a gap below the newest message. Keeping
-          // it off means every return to the bottom goes through
-          // scrollChatToBottom and its physical scroll clamp.
+          // Owncast handles bottom scrolling itself so every follow goes
+          // through scrollChatToBottom and its physical scroll clamp.
           followOutput={false}
           alignToBottom
           // Tolerant of virtualized measurement drift (worst at high page
@@ -415,13 +521,22 @@ export const ChatContainer: FC<ChatContainerProps> = ({
           atBottomStateChange={bottom => {
             isAtBottomRef.current = bottom;
             setShowScrollToBottomButton(!bottom);
-            if (bottom) setUnreadCount(0);
+            if (bottom) {
+              shouldFollowBottomRef.current = false;
+              setUnreadCount(0);
+            }
+          }}
+          totalListHeightChanged={() => {
+            if (isAtBottomRef.current || shouldFollowBottomRef.current) {
+              scheduleScrollToBottom();
+            }
           }}
         />
         {showScrollToBottomButton && (
           <ScrollToBotBtn
             count={unreadCount}
             onClick={() => {
+              shouldFollowBottomRef.current = false;
               scrollChatToBottom(chatContainerRef);
               setUnreadCount(0);
             }}
