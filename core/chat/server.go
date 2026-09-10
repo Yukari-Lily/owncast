@@ -17,6 +17,7 @@ import (
 	"github.com/owncast/owncast/core/user"
 	"github.com/owncast/owncast/core/webhooks"
 	"github.com/owncast/owncast/geoip"
+	"github.com/owncast/owncast/notifications/onebot"
 	"github.com/owncast/owncast/utils"
 )
 
@@ -127,9 +128,11 @@ func (s *Server) Addclient(conn *websocket.Conn, user *user.User, accessToken st
 
 	client.sendConnectedClientInfo()
 
+	sentUserJoinedEvent := false
 	if getStatus().Online {
 		if shouldSendJoinedMessages {
 			s.sendUserJoinedMessage(client)
+			sentUserJoinedEvent = true
 		}
 		s.sendWelcomeMessageToClient(client)
 	}
@@ -137,6 +140,11 @@ func (s *Server) Addclient(conn *websocket.Conn, user *user.User, accessToken st
 	// Asynchronously, optionally, fetch GeoIP data.
 	go func(client *Client) {
 		client.Geo = s.geoipClient.GetGeoFromIP(ipAddress)
+		if sentUserJoinedEvent {
+			if err := onebot.SendViewerJoinedNotification(client.User.DisplayName, client.IPAddress, client.UserAgent, client.Geo); err != nil {
+				log.Errorf("unable to send OneBot viewer notification: %v", err)
+			}
+		}
 	}(client)
 
 	return client

@@ -82,6 +82,9 @@ export const DELETE_WEBHOOK = `${API_LOCATION}webhooks/delete`;
 // Create a single webhook
 export const CREATE_WEBHOOK = `${API_LOCATION}webhooks/create`;
 
+// Get or update OneBot 11 viewer notification configuration
+export const ONEBOT_CONFIG = `${API_LOCATION}config/onebot`;
+
 // hard coded social icons list
 export const SOCIAL_PLATFORMS_LIST = `${NEXT_PUBLIC_API_HOST}api/socialplatforms`;
 

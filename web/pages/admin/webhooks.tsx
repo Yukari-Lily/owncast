@@ -1,12 +1,17 @@
 /* eslint-disable react/destructuring-assignment */
 import {
+  Alert,
   Button,
   Checkbox,
   Col,
+  Divider,
+  Form,
   Input,
   Modal,
   Row,
+  Select,
   Space,
+  Switch,
   Table,
   Tag,
   Typography,
@@ -14,7 +19,13 @@ import {
 } from 'antd';
 import dynamic from 'next/dynamic';
 import React, { ReactElement, useEffect, useState } from 'react';
-import { CREATE_WEBHOOK, DELETE_WEBHOOK, fetchData, WEBHOOKS } from '../../utils/apis';
+import {
+  CREATE_WEBHOOK,
+  DELETE_WEBHOOK,
+  fetchData,
+  ONEBOT_CONFIG,
+  WEBHOOKS,
+} from '../../utils/apis';
 import { isValidUrl, DEFAULT_TEXTFIELD_URL_PATTERN } from '../../utils/validators';
 
 import { AdminLayout } from '../../components/layouts/AdminLayout';
@@ -26,6 +37,24 @@ const { Title, Paragraph } = Typography;
 const DeleteOutlined = dynamic(() => import('@ant-design/icons/DeleteOutlined'), {
   ssr: false,
 });
+
+type OneBotTargetType = 'group' | 'private';
+
+interface OneBotConfiguration {
+  apiUrl: string;
+  targetType: OneBotTargetType;
+  targetId: string;
+  enabled: boolean;
+  accessTokenConfigured: boolean;
+}
+
+const defaultOneBotConfiguration: OneBotConfiguration = {
+  apiUrl: '',
+  targetType: 'group',
+  targetId: '',
+  enabled: false,
+  accessTokenConfigured: false,
+};
 
 const availableEvents = {
   CHAT: { name: 'Chat messages', description: 'When a user sends a chat message', color: 'purple' },
@@ -137,6 +166,196 @@ const NewWebhookModal = (props: Props) => {
   );
 };
 
+const OneBotConfigurationForm = () => {
+  const [configuration, setConfiguration] = useState<OneBotConfiguration>(
+    defaultOneBotConfiguration,
+  );
+  const [accessToken, setAccessToken] = useState('');
+  const [clearAccessToken, setClearAccessToken] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
+
+  useEffect(() => {
+    async function loadConfiguration() {
+      try {
+        const result = await fetchData(ONEBOT_CONFIG);
+        setConfiguration({ ...defaultOneBotConfiguration, ...result });
+      } catch (error) {
+        setFeedback({
+          type: 'error',
+          message: error instanceof Error ? error.message : '无法读取 OneBot 配置',
+        });
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadConfiguration();
+  }, []);
+
+  const updateConfiguration = (field: keyof OneBotConfiguration, value: string | boolean) => {
+    setConfiguration(current => ({ ...current, [field]: value }));
+    setFeedback(null);
+  };
+
+  const targetIsValid = /^\d+$/.test(configuration.targetId) && configuration.targetId !== '0';
+  const configurationIsValid =
+    !configuration.enabled || (isValidUrl(configuration.apiUrl) && targetIsValid);
+
+  const saveConfiguration = async () => {
+    setSaving(true);
+    setFeedback(null);
+
+    const request: any = {
+      apiUrl: configuration.apiUrl.trim(),
+      targetType: configuration.targetType,
+      targetId: configuration.targetId.trim(),
+      enabled: configuration.enabled,
+      clearAccessToken,
+    };
+    if (accessToken.trim()) {
+      request.accessToken = accessToken.trim();
+    }
+
+    try {
+      await fetchData(ONEBOT_CONFIG, { method: 'POST', data: request });
+      setConfiguration(current => ({
+        ...current,
+        apiUrl: request.apiUrl,
+        targetId: request.targetId,
+        accessTokenConfigured: clearAccessToken
+          ? false
+          : Boolean(accessToken.trim()) || current.accessTokenConfigured,
+      }));
+      setAccessToken('');
+      setClearAccessToken(false);
+      setFeedback({ type: 'success', message: 'OneBot 配置已保存' });
+    } catch (error) {
+      setFeedback({
+        type: 'error',
+        message: error instanceof Error ? error.message : '保存 OneBot 配置失败',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section>
+      <Title>OneBot 11 新观众通知</Title>
+      <Paragraph>
+        当新的 IP 或 User-Agent 进入聊天时，通过 OneBot 11 向指定的 QQ 群或私聊发送通知。
+      </Paragraph>
+
+      <Form layout="vertical" style={{ maxWidth: 720 }}>
+        <Form.Item label="启用 QQBot 通知">
+          <Switch
+            checked={configuration.enabled}
+            checkedChildren="开启"
+            unCheckedChildren="关闭"
+            loading={loading}
+            onChange={value => updateConfiguration('enabled', value)}
+          />
+        </Form.Item>
+
+        <Form.Item label="OneBot HTTP 地址" required={configuration.enabled}>
+          <Input
+            type="url"
+            value={configuration.apiUrl}
+            placeholder="http://127.0.0.1:3000"
+            disabled={loading}
+            onChange={event => updateConfiguration('apiUrl', event.target.value)}
+          />
+        </Form.Item>
+
+        <Form.Item
+          label="Access Token（可选）"
+          extra={
+            configuration.accessTokenConfigured && !clearAccessToken
+              ? '已保存 Token；留空不会修改。'
+              : '未配置 Token。'
+          }
+        >
+          <Input.Password
+            value={accessToken}
+            placeholder={
+              configuration.accessTokenConfigured ? '留空保持现有 Token' : '请输入 Token'
+            }
+            disabled={loading || clearAccessToken}
+            onChange={event => {
+              setAccessToken(event.target.value);
+              setFeedback(null);
+            }}
+          />
+        </Form.Item>
+
+        {configuration.accessTokenConfigured && (
+          <Form.Item>
+            <Checkbox
+              checked={clearAccessToken}
+              onChange={event => {
+                setClearAccessToken(event.target.checked);
+                setFeedback(null);
+              }}
+            >
+              清除已保存的 Token
+            </Checkbox>
+          </Form.Item>
+        )}
+
+        <Form.Item label="发送目标">
+          <Select
+            value={configuration.targetType}
+            disabled={loading}
+            onChange={(value: OneBotTargetType) => updateConfiguration('targetType', value)}
+            options={[
+              { value: 'group', label: '群聊' },
+              { value: 'private', label: '私聊' },
+            ]}
+          />
+        </Form.Item>
+
+        <Form.Item
+          label={configuration.targetType === 'group' ? '群号' : 'QQ 号'}
+          required={configuration.enabled}
+        >
+          <Input
+            value={configuration.targetId}
+            inputMode="numeric"
+            placeholder={configuration.targetType === 'group' ? '请输入群号' : '请输入 QQ 号'}
+            disabled={loading}
+            onChange={event =>
+              updateConfiguration('targetId', event.target.value.replace(/\D/g, ''))
+            }
+          />
+        </Form.Item>
+
+        <Button
+          type="primary"
+          loading={saving}
+          disabled={loading || !configurationIsValid}
+          onClick={saveConfiguration}
+        >
+          保存
+        </Button>
+      </Form>
+
+      {feedback && (
+        <Alert
+          style={{ marginTop: 16, maxWidth: 720 }}
+          type={feedback.type}
+          message={feedback.message}
+          showIcon
+        />
+      )}
+    </section>
+  );
+};
+
 const Webhooks = () => {
   const [webhooks, setWebhooks] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -226,6 +445,8 @@ const Webhooks = () => {
 
   return (
     <div>
+      <OneBotConfigurationForm />
+      <Divider />
       <Title>Webhooks</Title>
       <Paragraph>
         A webhook is a callback made to an external API in response to an event that takes place

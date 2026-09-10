@@ -225,6 +225,9 @@ func Start() error {
 	// Create a single webhook
 	http.HandleFunc("/api/admin/webhooks/create", middleware.RequireAdminAuth(admin.CreateWebhook))
 
+	// Get or update the OneBot 11 viewer notification configuration.
+	http.HandleFunc("/api/admin/config/onebot", middleware.RequireAdminAuth(admin.OneBotConfiguration))
+
 	// Get all access tokens
 	http.HandleFunc("/api/admin/accesstokens", middleware.RequireAdminAuth(admin.GetExternalAPIUsers))
 

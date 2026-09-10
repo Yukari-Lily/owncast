@@ -65,6 +65,7 @@ const (
 	chatEstablishedUsersOnlyModeKey = "chat_established_users_only_mode"
 	notificationsEnabledKey         = "notifications_enabled"
 	discordConfigurationKey         = "discord_configuration"
+	oneBotConfigurationKey          = "onebot_configuration"
 	browserPushConfigurationKey     = "browser_push_configuration"
 	browserPushPublicKeyKey         = "browser_push_public_key"
 	// nolint:gosec
@@ -862,6 +863,27 @@ func GetDiscordConfig() models.DiscordConfiguration {
 // SetDiscordConfig will set the Discord configuration.
 func SetDiscordConfig(config models.DiscordConfiguration) error {
 	configEntry := ConfigEntry{Key: discordConfigurationKey, Value: config}
+	return _datastore.Save(configEntry)
+}
+
+// GetOneBotConfig will return the OneBot 11 notification configuration.
+func GetOneBotConfig() models.OneBotConfiguration {
+	configEntry, err := _datastore.Get(oneBotConfigurationKey)
+	if err != nil {
+		return models.OneBotConfiguration{Enabled: false, TargetType: models.OneBotTargetGroup}
+	}
+
+	var config models.OneBotConfiguration
+	if err := configEntry.getObject(&config); err != nil {
+		return models.OneBotConfiguration{Enabled: false, TargetType: models.OneBotTargetGroup}
+	}
+
+	return config
+}
+
+// SetOneBotConfig will set the OneBot 11 notification configuration.
+func SetOneBotConfig(config models.OneBotConfiguration) error {
+	configEntry := ConfigEntry{Key: oneBotConfigurationKey, Value: config}
 	return _datastore.Save(configEntry)
 }
 
